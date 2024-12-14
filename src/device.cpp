@@ -70,6 +70,12 @@ static uint8_t resolve_device_capabilities(int fd, uint32_t *num_keys, uint8_t *
 		return 0;
 	}
 
+	uint8_t led_caps = 0;
+	if (ioctl(fd, EVIOCGBIT(EV_LED, 1), &led_caps) < 0) {
+		perror("ioctl: EV_LED");
+		return 0;
+	}
+
 	*num_keys = 0;
 	for (i = 0; i < sizeof(mask)/sizeof(mask[0]); i++)
 		*num_keys += __builtin_popcount(mask[i]);
@@ -79,6 +85,9 @@ static uint8_t resolve_device_capabilities(int fd, uint32_t *num_keys, uint8_t *
 
 	if (*absmask)
 		capabilities |= CAP_MOUSE_ABS;
+
+	if (led_caps)
+		capabilities |= CAP_LEDS;
 
 	/*
 	 * If the device can emit KEY_BRIGHTNESSUP or KEY_VOLUMEUP, we treat it as a keyboard.
@@ -350,6 +359,11 @@ int device_grab(struct device *dev)
 		usleep(100);
 	}
 
+	if (dev->capabilities & CAP_LEDS && ioctl(dev->fd, EVIOCGLED(LED_CNT), dev->led_state) < 0) {
+		perror("EVIOCGLED");
+		return -1;
+	}
+
 	if (ioctl(dev->fd, EVIOCGRAB, (void *) 1) < 0) {
 		perror("EVIOCGRAB");
 		return -1;
@@ -392,7 +406,6 @@ struct device_event *device_read_event(struct device *dev)
 		if (errno == EAGAIN) {
 			return NULL;
 		} else {
-			dev->fd = -1;
 			devev.type = DEV_REMOVED;
 			return &devev;
 		}
@@ -518,12 +531,15 @@ struct device_event *device_read_event(struct device *dev)
 	return &devev;
 }
 
-void device_set_led(const struct device *dev, int led, int state)
+void device_set_led(const struct device *dev, uint8_t led, int state)
 {
+	if (led > LED_MAX || !(dev->capabilities & CAP_LEDS))
+		return;
+
 	struct input_event ev = {
 		.time = {},
 		.type = EV_LED,
-		.code = (unsigned short)led,
+		.code = led,
 		.value = state
 	};
 
