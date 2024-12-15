@@ -75,7 +75,7 @@ struct keyboard {
 
 	uint8_t inhibit_modifier_guard;
 
-	struct macro *active_macro;
+	::macro* active_macro;
 	int active_macro_layer;
 	int overload_last_layer_code;
 
@@ -121,13 +121,14 @@ struct keyboard {
 		struct descriptor action2;
 	} pending_key;
 
-	struct {
+	struct layer_state_t {
 		long activation_time;
 
 		uint8_t active;
 		uint8_t toggled;
 		uint8_t oneshot_depth;
-	} layer_state[MAX_LAYERS];
+	};
+	std::vector<layer_state_t> layer_state;
 
 	uint8_t keystate[256];
 

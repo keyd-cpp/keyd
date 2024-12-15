@@ -76,7 +76,7 @@ static void add_listener(int con)
 		struct config *config = &active_kbd->config;
 		struct layer *layout = &config->layers[0];
 
-		for (i = 1; i < config->nr_layers; i++)
+		for (i = 1; i < config->layers.size(); i++)
 			if (active_kbd->layer_state[i].active) {
 				struct layer *layer = &config->layers[i];
 
@@ -86,15 +86,15 @@ static void add_listener(int con)
 				}
 			}
 
-		dprintf(con, "/%s\n", layout->name);
+		dprintf(con, "/%s\n", layout->name.c_str());
 
-		for (i = 1; i < config->nr_layers; i++) {
+		for (i = 0; i < config->layers.size(); i++) {
 			if (active_kbd->layer_state[i].active) {
 				ssize_t ret;
 				struct layer *layer = &config->layers[i];
 
 				if (layer->type != LT_LAYOUT) {
-					ret = dprintf(con, "+%s\n", layer->name);
+					ret = dprintf(con, "+%s\n", layer->name.c_str());
 					if (ret < 0)
 						goto fail;
 				}
@@ -109,41 +109,43 @@ fail:
 	return;
 }
 
+static void activate_leds(const struct keyboard *kbd)
+{
+	int active_layers = 0;
+
+	for (size_t i = 1; i < kbd->config.layers.size(); i++)
+		if (kbd->config.layers[i].type != LT_LAYOUT && kbd->layer_state[i].active) {
+			active_layers = 1;
+			break;
+		}
+
+	for (size_t i = 0; i < device_table_sz; i++)
+		if (device_table[i].data == kbd)
+			device_set_led(&device_table[i], 1, active_layers);
+}
+
 static void on_layer_change(const struct keyboard *kbd, const struct layer *layer, uint8_t state)
 {
 	size_t i;
-	char buf[MAX_LAYER_NAME_LEN+2];
-	ssize_t bufsz;
+	std::string buf = "/" + layer->name + "\n";
 
 	int keep[ARRAY_SIZE(listeners)];
 	size_t n = 0;
 
 	if (kbd->config.layer_indicator) {
-		int active_layers = 0;
-
-		for (i = 1; i < kbd->config.nr_layers; i++)
-			if (kbd->config.layers[i].type != LT_LAYOUT && kbd->layer_state[i].active) {
-				active_layers = 1;
-				break;
-			}
-
-		for (i = 0; i < device_table_sz; i++)
-			if (device_table[i].data == kbd)
-				device_set_led(&device_table[i], 1, active_layers);
+		activate_leds(kbd);
 	}
 
 	if (!nr_listeners)
 		return;
 
-	if (layer->type == LT_LAYOUT)
-		bufsz = snprintf(buf, sizeof(buf), "/%s\n", layer->name);
-	else
-		bufsz = snprintf(buf, sizeof(buf), "%c%s\n", state ? '+' : '-', layer->name);
+	if (layer->type != LT_LAYOUT)
+		buf[0] = state ? '+' : '-';
 
 	for (i = 0; i < nr_listeners; i++) {
-		ssize_t nw = write(listeners[i], buf, bufsz);
+		size_t nw = write(listeners[i], buf.c_str(), buf.size());
 
-		if (nw == bufsz)
+		if (nw == buf.size())
 			keep[n++] = listeners[i];
 		else
 			close(listeners[i]);
@@ -378,20 +380,20 @@ static void handle_client(int con)
 		return;
 	}
 
+	::macro macro;
 	switch (msg.type) {
 		int success;
-		struct macro macro;
 
 	case IPC_MACRO:
 		while (msg.sz && msg.data[msg.sz-1] == '\n')
 			msg.data[--msg.sz] = 0;
 
-		if (macro_parse(msg.data, &macro)) {
+		if (macro_parse(msg.data, macro)) {
 			send_fail(con, "%s", errstr);
 			return;
 		}
 
-		macro_execute(send_key, &macro, msg.timeout);
+		macro_execute(send_key, macro, msg.timeout);
 		send_success(con);
 
 		break;
@@ -521,7 +523,7 @@ static int event_handler(struct event *ev)
 		} else if (ev->dev->is_virtual && ev->devev->type == DEV_LED) {
 			size_t i;
 
-			/* 
+			/*
 			 * Propagate LED events received by the virtual device from userspace
 			 * to all grabbed devices.
 			 *

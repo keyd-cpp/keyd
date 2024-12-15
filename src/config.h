@@ -10,12 +10,9 @@
 #include "macro.h"
 #include <vector>
 #include <string>
+#include <array>
 
-#define MAX_LAYER_NAME_LEN	64
 #define MAX_DESCRIPTOR_ARGS	3
-
-#define MAX_LAYERS		32
-#define MAX_EXP_LEN		512
 
 #define ID_EXCLUDED	1
 #define ID_MOUSE	2
@@ -68,9 +65,7 @@ struct descriptor {
 };
 
 struct chord {
-	uint8_t keys[8];
-	size_t sz;
-
+	std::array<uint8_t, 8> keys;
 	struct descriptor d;
 };
 
@@ -82,22 +77,20 @@ struct chord {
  * layers consisting of the corresponding modifier and an empty keymap.
  */
 
-enum layer_type_e {
+enum layer_type_e : short {
 	LT_NORMAL,
 	LT_LAYOUT,
 	LT_COMPOSITE,
 };
 
 struct layer {
-	char name[MAX_LAYER_NAME_LEN+1];
+	std::string name;
 
 	enum layer_type_e type;
 
 	uint8_t mods;
+	std::vector<chord> chords;
 	struct descriptor keymap[256];
-
-	struct chord chords[64];
-	size_t nr_chords;
 
 	/* Used for composite layers. */
 	size_t nr_constituents;
@@ -106,13 +99,13 @@ struct layer {
 
 struct config {
 	std::string pathstr;
-	struct layer layers[MAX_LAYERS];
+	std::vector<layer> layers;
 
 	/* Auxiliary descriptors used by layer bindings. */
-	struct descriptor descriptors[1024];
+	std::vector<descriptor> descriptors;
 	std::vector<macro> macros;
 	std::vector<std::string> commands;
-	char aliases[256][32];
+	std::array<std::string, 256> aliases;
 
 	uint8_t wildcard;
 	struct {
@@ -120,11 +113,7 @@ struct config {
 		uint8_t flags;
 	} ids[64];
 
-
 	size_t nr_ids;
-
-	size_t nr_layers;
-	size_t nr_descriptors;
 
 	long macro_timeout;
 	long macro_sequence_timeout;
@@ -138,12 +127,11 @@ struct config {
 
 	uint8_t layer_indicator;
 	uint8_t disable_modifier_guard;
-	char default_layout[MAX_LAYER_NAME_LEN];
+	std::string default_layout;
 };
 
 int config_parse(struct config *config, const char *path);
 int config_add_entry(struct config *config, const char *exp);
-int config_get_layer_index(const struct config *config, const char *name);
 
 int config_check_match(struct config *config, const char *id, uint8_t flags);
 
