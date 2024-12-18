@@ -17,7 +17,7 @@ static int ipc_exec(enum ipc_msg_type_e type, const char *data, size_t sz, uint3
 	msg.timeout = timeout;
 	memcpy(msg.data, data, sz);
 
-	int con = ipc_connect();
+	static int con = ipc_connect();
 
 	if (con < 0) {
 		perror("connect");
@@ -25,7 +25,8 @@ static int ipc_exec(enum ipc_msg_type_e type, const char *data, size_t sz, uint3
 	}
 
 	xwrite(con, &msg, sizeof msg);
-	xread(con, &msg, sizeof msg);
+	if (!xread(con, &msg, sizeof msg))
+		exit(-1);
 
 	if (msg.sz) {
 		xwrite(1, msg.data, msg.sz);
@@ -33,18 +34,16 @@ static int ipc_exec(enum ipc_msg_type_e type, const char *data, size_t sz, uint3
 	}
 
 	return msg.type == IPC_FAIL;
-
-	return type == IPC_FAIL;
 }
 
-static int version(int argc, char *argv[])
+static int version(int, char *[])
 {
 	printf("keyd " VERSION "\n");
 
 	return 0;
 }
 
-static int help(int argc, char *argv[])
+static int help(int, char *[])
 {
 	printf("usage: keyd [-v] [-h] [command] [<args>]\n\n"
 	       "Commands:\n"
@@ -60,7 +59,7 @@ static int help(int argc, char *argv[])
 	return 0;
 }
 
-static int list_keys(int argc, char *argv[])
+static int list_keys(int, char *[])
 {
 	size_t i;
 
@@ -161,7 +160,7 @@ static int input(int argc, char *argv[])
 	return ipc_exec(IPC_INPUT, buf, sz, timeout);
 }
 
-static int layer_listen(int argc, char *argv[])
+static int layer_listen(int, char *[])
 {
 	struct ipc_message msg = {};
 
@@ -202,7 +201,7 @@ static int layer_listen(int argc, char *argv[])
 	}
 }
 
-static int reload(int argc, char *argv[])
+static int reload(int, char *[])
 {
 	ipc_exec(IPC_RELOAD, NULL, 0, 0);
 

@@ -8,8 +8,10 @@
 
 #include <limits.h>
 #include "macro.h"
+#include <memory>
 #include <vector>
 #include <string>
+#include <string_view>
 #include <array>
 #include <map>
 
@@ -102,6 +104,20 @@ struct layer {
 	int constituents[8];
 };
 
+struct env_pack {
+	std::vector<char> buf;
+	std::unique_ptr<const char*[]> env;
+	uid_t uid;
+	gid_t gid;
+};
+
+struct ucmd {
+	uid_t uid;
+	gid_t gid;
+	std::string cmd;
+	std::shared_ptr<env_pack> env = nullptr;
+};
+
 struct config {
 	std::string pathstr;
 	std::vector<layer> layers;
@@ -110,8 +126,12 @@ struct config {
 	/* Auxiliary descriptors used by layer bindings. */
 	std::vector<descriptor> descriptors;
 	std::vector<macro> macros;
-	std::vector<std::string> commands;
+	std::vector<ucmd> commands;
 	std::multimap<std::string, descriptor, std::less<>> aliases;
+
+	uid_t cfg_use_uid = 0;
+	gid_t cfg_use_gid = 0;
+	std::shared_ptr<env_pack> env;
 
 	uint8_t wildcard;
 	struct {
