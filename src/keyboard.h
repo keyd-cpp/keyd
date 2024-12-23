@@ -33,7 +33,7 @@ struct key_event {
 
 struct output {
 	void (*send_key) (uint8_t code, uint8_t state);
-	void (*on_layer_change) (const struct keyboard *kbd, const struct layer *layer, uint8_t active);
+	void (*on_layer_change) (const struct keyboard *kbd, struct layer *layer, uint8_t active);
 };
 
 enum class chord_state_e : signed char {
@@ -148,7 +148,7 @@ struct keyboard {
 std::unique_ptr<keyboard> new_keyboard(std::unique_ptr<keyboard>);
 
 long kbd_process_events(struct keyboard *kbd, const struct key_event *events, size_t n);
-int kbd_eval(struct keyboard *kbd, const char *exp);
+bool kbd_eval(struct keyboard *kbd, std::string_view);
 void kbd_reset(struct keyboard *kbd);
 
 #endif

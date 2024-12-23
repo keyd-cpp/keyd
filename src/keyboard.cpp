@@ -398,7 +398,7 @@ void execute_command(ucmd& cmd)
 	dup2(fd, 1);
 	dup2(fd, 2);
 
-	if (auto env = cmd.env.get())
+	if (auto env = cmd.env.get(); env && env->env)
 		execle("/bin/sh", "/bin/sh", "-c", cmd.cmd.c_str(), nullptr, env->env.get());
 	else
 		execl("/bin/sh", "/bin/sh", "-c", cmd.cmd.c_str(), nullptr);
@@ -1210,20 +1210,35 @@ long kbd_process_events(struct keyboard *kbd, const struct key_event *events, si
 	return timeout;
 }
 
-int kbd_eval(struct keyboard *kbd, const char *exp)
+bool kbd_eval(struct keyboard* kbd, std::string_view exp)
 {
-	if (!strcmp(exp, "reset")) {
+	if (exp.empty())
+		return true;
+	if (exp == "reset") {
 		kbd->original_config.back().restore(kbd->config);
 		kbd->layer_state.resize(kbd->config.layers.size());
-		return 0;
+		return true;
+	} else if (exp == "push") {
+		kbd->original_config.emplace_back(kbd->config);
+		return true;
+	} else if (exp == "pop") {
+		// Don't allow removing first "backup"
+		if (kbd->original_config.size() <= 1)
+			return false;
+		kbd->original_config.pop_back();
+		return true;
+	} else if (exp == "pop_all") {
+		while (kbd->original_config.size() > 1)
+			kbd->original_config.pop_back();
+		return true;
 	} else {
 		if (int idx = config_add_entry(&kbd->config, exp); idx >= 0) {
 			kbd->layer_state.resize(kbd->config.layers.size());
 			kbd->config.layers[idx].modified = true;
 			kbd->config.layers[idx].keymap.sort();
-			return 0;
+			return true;
 		}
 	}
 
-	return -1;
+	return false;
 }

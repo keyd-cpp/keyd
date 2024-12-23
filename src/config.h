@@ -124,6 +124,8 @@ struct env_pack {
 	std::unique_ptr<const char*[]> env;
 	uid_t uid;
 	gid_t gid;
+
+	const char* getenv(std::string_view);
 };
 
 struct ucmd {
@@ -194,7 +196,7 @@ struct config_backup {
 };
 
 int config_parse(struct config *config, const char *path);
-int config_add_entry(struct config *config, const char *exp);
+int config_add_entry(struct config *config, std::string_view);
 
 int config_check_match(struct config *config, const char *id, uint8_t flags);
 

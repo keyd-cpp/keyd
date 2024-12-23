@@ -89,7 +89,7 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 					tok.remove_prefix(chrsz);
 				}
 				if (!tok.empty()) {
-					err("invalid macro text found: %s", std::string(tok).c_str());
+					err("invalid macro text found: %.*s", (int)tok.size(), tok.data());
 					return -1;
 				}
 			}
@@ -112,7 +112,7 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 				else if (!parse_key_sequence(key, &code, &mods))
 					ADD_ENTRY(MACRO_HOLD, code);
 				else {
-					err("%s is not a valid key", std::string(key).c_str());
+					err("%.*s is not a valid key", (int)key.size(), key.data());
 					return -1;
 				}
 			}
@@ -153,7 +153,7 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 			}
 		}
 
-		err("%s is not a valid key sequence", std::string(tok).c_str());
+		err("%.*s is not a valid key sequence", (int)tok.size(), tok.data());
 		return -1;
 	}
 

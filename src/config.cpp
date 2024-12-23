@@ -326,9 +326,6 @@ static int set_layer_entry(const struct config *config,
 
 static std::string layer_sorted_name(std::string_view name)
 {
-#ifdef __cpp_lib_constexpr_vector
-	constinit
-#endif
 	static std::vector<std::string_view> arr;
 	arr.assign(split_char<'+'>(name), split_str<'+'>());
 	for (auto& name : arr) {
@@ -383,7 +380,7 @@ static int new_layer(std::string_view s, std::string_view name, struct config *c
 		for (auto layername : split_char<'+'>(name)) {
 			int idx = config_access_layer(config, layername, true);
 			if (idx < 0) {
-				err("%s is not a valid layer", std::string(layername).c_str());
+				err("%.*s is not a valid layer", (int)layername.size(), layername.data());
 				return -1;
 			}
 
@@ -403,7 +400,7 @@ static int new_layer(std::string_view s, std::string_view name, struct config *c
 		layer->mods = mods;
 	} else {
 		if (!type.empty())
-			warn("\"%s\" is not a valid layer type, ignoring\n", std::string(type).c_str());
+			warn("\"%.*s\" is not a valid layer type, ignoring\n", (int)type.size(), type.data());
 
 		layer->type = LT_NORMAL;
 		layer->mods = 0;
@@ -540,7 +537,7 @@ static int parse_macro_expression(std::string_view s, macro& macro, struct confi
 		s.remove_suffix(1);
 		s.remove_prefix(6);
 	} else if (parse_key_sequence(s, &code, &mods) && utf8_strlen(s) != 1) {
-		err("Invalid macro: %s\n", std::string(s).c_str());
+		err("Invalid macro: %.*s\n", (int)s.size(), s.data());
 		return -1;
 	}
 
@@ -908,7 +905,7 @@ static int config_parse_string(struct config *config, char *content)
 			entry += ent->key;
 			entry += " = ";
 			entry += ent->val;
-			if (config_add_entry(config, entry.c_str()) < 0)
+			if (config_add_entry(config, entry) < 0)
 				keyd_log("\tr{ERROR:} line m{%zd}: %s\n", ent->lnum, errstr);
 		}
 	}
@@ -1014,14 +1011,15 @@ int config_get_layer_index(const struct config *config, std::string_view name)
  * Adds a binding of the form [<layer>.]<key> = <descriptor expression>
  * to the given config. Returns layer index that was modified.
  */
-int config_add_entry(struct config *config, const char *exp)
+int config_add_entry(struct config* config, std::string_view exp)
 {
 	char *keyname, *descstr, *dot, *paren, *s;
 	const char *layername = "main";
 	struct descriptor d;
 	struct layer *layer;
 
-	std::string buf = exp;
+	static std::string buf;
+	buf.assign(exp);
 	s = buf.data();
 
 	dot = strchr(s, '.');
@@ -1049,6 +1047,25 @@ int config_add_entry(struct config *config, const char *exp)
 		return -1;
 
 	return idx;
+}
+
+const char* env_pack::getenv(std::string_view name)
+{
+	if (!env)
+		return nullptr;
+	for (size_t i = 0;; i++){
+		const char* ptr = env[i];
+		if (!ptr)
+			return nullptr;
+		// TODO: is this safe?
+		if (!strncmp(ptr, name.data(), name.size())) {
+			ptr += name.size();
+			if (*ptr == '=')
+				return ptr + 1;
+			if (*ptr == 0)
+				return nullptr;
+		}
+	}
 }
 
 config_backup::config_backup(const struct config& cfg)

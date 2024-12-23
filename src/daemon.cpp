@@ -1,4 +1,5 @@
 #include "keyd.h"
+#include "log.h"
 #include <memory>
 #include <utility>
 #include <fstream>
@@ -177,7 +178,7 @@ static void restore_leds()
 	}
 }
 
-static void on_layer_change(const struct keyboard *kbd, const struct layer *layer, uint8_t state)
+static void on_layer_change(const struct keyboard *kbd, struct layer *layer, uint8_t state)
 {
 	if (kbd->config.layer_indicator) {
 		activate_leds(kbd);
@@ -225,7 +226,7 @@ static void load_configs()
 					.on_layer_change = on_layer_change,
 				};
 				kbd = new_keyboard(std::move(kbd));
-				kbd->original_config.reserve(1);
+				kbd->original_config.reserve(2);
 				kbd->original_config.emplace_back(kbd->config);
 
 				ent->kbd = std::move(kbd);
@@ -296,7 +297,7 @@ static void manage_device(struct device *dev)
 	}
 }
 
-static void reload()
+static void reload(std::shared_ptr<env_pack> env)
 {
 	restore_leds();
 	configs.reset();
@@ -306,6 +307,37 @@ static void reload()
 		manage_device(&device_table[i]);
 
 	clear_vkbd();
+
+	if (env && env->uid >= 1000) {
+		// Load user bindings (may be not loaded when executed as root)
+		static std::string buf;
+		if (auto v = env->getenv("XDG_CONFIG_HOME"))
+			buf.assign(v) += "/";
+		else if (auto v = env->getenv("HOME"))
+			buf.assign(v) += "/.config/";
+		else
+			buf.clear();
+		buf += "keyd/bindings.conf";
+		std::ifstream file(buf, std::ios::binary);
+		if (!file.is_open()) {
+			keyd_log("Unable to open %s\n", buf.c_str());
+			return;
+		}
+		buf.assign(std::istreambuf_iterator(file), std::istreambuf_iterator<char>());
+
+		for (auto ent = configs.get(); ent; ent = ent->next.get()) {
+			ent->kbd->config.cfg_use_uid = env->uid;
+			ent->kbd->config.cfg_use_gid = env->gid;
+			ent->kbd->config.env = env;
+			for (auto str : split_char<'\n'>(buf)) {
+				if (str.empty())
+					continue;
+				if (!kbd_eval(ent->kbd.get(), str))
+					keyd_log("Invalid binding: %.*s\n", (int)str.size(), str.data());
+			}
+			ent->kbd->original_config.emplace_back(ent->kbd->config);
+		}
+	}
 
 	for (auto ent = configs.get(); ent; ent = ent->next.get()) {
 		for (auto& layer : ent->kbd->config.layers)
@@ -404,7 +436,7 @@ static int input(char *buf, [[maybe_unused]] size_t sz, uint32_t timeout)
 	return 0;
 }
 
-static bool handle_message(listener& con, struct config* config)
+static bool handle_message(::listener& con, struct config* config, std::shared_ptr<env_pack> env)
 {
 	struct ipc_message msg;
 	if (!xread(con, &msg, sizeof(msg))) {
@@ -447,7 +479,7 @@ static bool handle_message(listener& con, struct config* config)
 			send_success(con);
 		break;
 	case IPC_RELOAD:
-		reload();
+		reload(std::move(env));
 		send_success(con);
 		break;
 	case IPC_LAYER_LISTEN:
@@ -467,8 +499,7 @@ static bool handle_message(listener& con, struct config* config)
 			ent->kbd->config.cfg_use_uid = config->cfg_use_uid;
 			ent->kbd->config.cfg_use_gid = config->cfg_use_gid;
 			ent->kbd->config.env = config->env;
-			if (!kbd_eval(ent->kbd.get(), msg.data))
-				success = 1;
+			success |= kbd_eval(ent->kbd.get(), msg.data);
 		}
 
 		if (success)
@@ -496,6 +527,9 @@ static void handle_client(::listener con)
 	::config ephemeral_config;
 	ephemeral_config.cfg_use_gid = cred.gid;
 	ephemeral_config.cfg_use_uid = cred.uid;
+	static std::shared_ptr<env_pack> prev = nullptr;
+	if (!prev || prev->uid != cred.uid || prev->gid != cred.gid)
+		prev.reset();
 	if (getuid() < 1000)
 	{
 		// Copy initial environment variables from caller process
@@ -503,8 +537,7 @@ static void handle_client(::listener con)
 		if (envf.is_open()) {
 			std::vector<char> buf;
 			buf.assign(std::istreambuf_iterator<char>(envf), std::istreambuf_iterator<char>());
-			static std::shared_ptr<env_pack> prev = nullptr;
-			if (prev && prev->buf == buf && prev->uid == cred.uid && prev->gid == cred.gid) {
+			if (prev && prev->buf == buf) {
 				// Share previous environment variables
 				ephemeral_config.env = prev;
 			} else {
@@ -525,7 +558,7 @@ static void handle_client(::listener con)
 	}
 
 	size_t msg_count = 0;
-	while (handle_message(con, &ephemeral_config)) {
+	while (handle_message(con, &ephemeral_config, prev ? prev : std::make_shared<env_pack>())) {
 		msg_count++;
 	}
 	dbg2("%zu messages processed", msg_count);
@@ -693,7 +726,7 @@ int run_daemon(int, char *[])
 
 	evloop_add_fd(ipcfd);
 
-	reload();
+	reload(std::make_shared<env_pack>());
 
 	atexit(cleanup);
 
