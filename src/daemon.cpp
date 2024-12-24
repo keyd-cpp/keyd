@@ -308,6 +308,11 @@ static void reload()
 		manage_device(&device_table[i]);
 
 	clear_vkbd();
+
+	for (auto ent = configs.get(); ent; ent = ent->next.get()) {
+		for (auto& layer : ent->kbd->config.layers)
+			layer.keymap.sort();
+	}
 }
 
 static void send_success(int con)
