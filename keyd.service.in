@@ -6,6 +6,7 @@ Documentation=man:keyd(1)
 Type=simple
 ExecStart=@PREFIX@/bin/keyd
 KillMode=process
+Environment="GLIBCXX_TUNABLES=glibcxx.eh_pool.obj_count=2:glibcxx.eh_pool.obj_size=4"
 
 [Install]
 WantedBy=multi-user.target

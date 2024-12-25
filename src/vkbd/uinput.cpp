@@ -9,7 +9,6 @@
 #include <sys/ioctl.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <pthread.h>
 #include <time.h>
 #include <errno.h>
 
@@ -168,12 +167,9 @@ static int create_virtual_pointer(const char *name)
 
 static void write_key_event(const struct vkbd *vkbd, uint8_t code, int state)
 {
-	static pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
 	struct input_event ev;
 	int fd;
 	int is_btn;
-
-	pthread_mutex_lock(&mtx);
 
 	fd = vkbd->fd;
 
@@ -230,14 +226,10 @@ static void write_key_event(const struct vkbd *vkbd, uint8_t code, int state)
 
 
 	xwrite(fd, &ev, sizeof(ev));
-
-	pthread_mutex_unlock(&mtx);
 }
 
 std::shared_ptr<vkbd> vkbd_init(const char *)
 {
-	pthread_t tid;
-
 	auto vkbd = std::make_shared<struct vkbd>();
 	vkbd->fd = create_virtual_keyboard(VKBD_NAME "keyboard");
 	vkbd->pfd = create_virtual_pointer(VKBD_NAME "pointer");

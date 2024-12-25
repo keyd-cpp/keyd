@@ -6,6 +6,25 @@
 
 #include "keyd.h"
 
+extern "C" char* __cxa_demangle(const char* mangled_name, char* output_buffer, size_t* length, int* status)
+{
+	// Return mangled name to remove demangler from ELF
+	std::string_view name = mangled_name;
+	void* buf = nullptr;
+	if (length) {
+		if (output_buffer && *length >= name.size() + 1)
+			buf = output_buffer;
+		*length = name.size() + 1;
+	}
+	if (!buf) {
+		buf = output_buffer ? realloc(output_buffer, name.size() + 1) : malloc(name.size() + 1);
+	}
+	if (status)
+		*status = 0;
+	memcpy(buf, mangled_name, name.size() + 1);
+	return static_cast<char*>(buf);
+}
+
 static int ipc_exec(enum ipc_msg_type_e type, const char *data, size_t sz, uint32_t timeout)
 {
 	struct ipc_message msg;
@@ -35,6 +54,10 @@ static int ipc_exec(enum ipc_msg_type_e type, const char *data, size_t sz, uint3
 
 	return msg.type == IPC_FAIL;
 }
+
+#ifndef VERSION
+#define VERSION "unknown"
+#endif
 
 static int version(int, char *[])
 {

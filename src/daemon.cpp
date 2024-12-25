@@ -2,7 +2,6 @@
 #include "log.h"
 #include <memory>
 #include <utility>
-#include <fstream>
 
 #ifndef CONFIG_DIR
 #define CONFIG_DIR ""
@@ -25,6 +24,7 @@ struct config_ent {
 static int ipcfd = -1;
 static std::shared_ptr<struct vkbd> vkbd;
 static std::unique_ptr<config_ent> configs;
+extern std::vector<device> device_table;
 
 static uint8_t keystate[256];
 
@@ -158,7 +158,7 @@ static void activate_leds(const struct keyboard *kbd)
 			break;
 		}
 
-	for (size_t i = 0; i < device_table_sz; i++)
+	for (size_t i = 0; i < device_table.size(); i++)
 		if (device_table[i].data == kbd && (device_table[i].capabilities & CAP_LEDS)) {
 			if (std::exchange(device_table[i].led_state[ind], active_layers) == active_layers)
 				continue;
@@ -168,7 +168,7 @@ static void activate_leds(const struct keyboard *kbd)
 
 static void restore_leds()
 {
-	for (size_t i = 0; i < device_table_sz; i++) {
+	for (size_t i = 0; i < device_table.size(); i++) {
 		struct device* dev = &device_table[i];
 		if (dev->grabbed && dev->data && (dev->capabilities & CAP_LEDS)) {
 			for (int j = 0; j < LED_CNT; j++) {
@@ -196,7 +196,6 @@ static void on_layer_change(const struct keyboard *kbd, struct layer *layer, uin
 static void load_configs()
 {
 	DIR *dh = opendir(CONFIG_DIR);
-	struct dirent *dirent;
 
 	if (!dh) {
 		perror("opendir");
@@ -205,22 +204,18 @@ static void load_configs()
 
 	configs.reset();
 
-	while ((dirent = readdir(dh))) {
-		char path[1024];
-		int len;
-
+	while (struct dirent* dirent = readdir(dh)) {
 		if (dirent->d_type == DT_DIR)
 			continue;
 
-		len = snprintf(path, sizeof path, "%s/%s", CONFIG_DIR, dirent->d_name);
-
-		if (len >= 5 && !strcmp(path + len - 5, ".conf")) {
+		auto name = concat(CONFIG_DIR "/", dirent->d_name);
+		if (name.ends_with(".conf")) {
 			auto ent = std::make_unique<config_ent>();
 
-			keyd_log("CONFIG: parsing b{%s}\n", path);
+			keyd_log("CONFIG: parsing b{%s}\n", name.c_str());
 
 			auto kbd = std::make_unique<keyboard>();
-			if (!config_parse(&kbd->config, path)) {
+			if (!config_parse(&kbd->config, name.c_str())) {
 				kbd->output = {
 					.send_key = send_key,
 					.on_layer_change = on_layer_change,
@@ -233,7 +228,7 @@ static void load_configs()
 				ent->next = std::move(configs);
 				configs = std::move(ent);
 			} else {
-				keyd_log("DEVICE: y{WARNING} failed to parse %s\n", path);
+				keyd_log("DEVICE: y{WARNING} failed to parse %s\n", name.c_str());
 			}
 
 		}
@@ -279,7 +274,7 @@ static void manage_device(struct device *dev)
 
 	if ((ent = lookup_config_ent(dev->id, flags))) {
 		if (device_grab(dev)) {
-			keyd_log("DEVICE: y{WARNING} Failed to grab %s\n", dev->path);
+			keyd_log("DEVICE: y{WARNING} Failed to grab /dev/input/%u\n", dev->num);
 			dev->data = NULL;
 			return;
 		}
@@ -300,17 +295,16 @@ static void manage_device(struct device *dev)
 static void reload(std::shared_ptr<env_pack> env)
 {
 	restore_leds();
-	configs.reset();
 	load_configs();
 
-	for (size_t i = 0; i < device_table_sz; i++)
+	for (size_t i = 0; i < device_table.size(); i++)
 		manage_device(&device_table[i]);
 
 	clear_vkbd();
 
 	if (env && env->uid >= 1000) {
 		// Load user bindings (may be not loaded when executed as root)
-		static std::string buf;
+		std::string buf;
 		if (auto v = env->getenv("XDG_CONFIG_HOME"))
 			buf.assign(v) += "/";
 		else if (auto v = env->getenv("HOME"))
@@ -318,12 +312,13 @@ static void reload(std::shared_ptr<env_pack> env)
 		else
 			buf.clear();
 		buf += "keyd/bindings.conf";
-		std::ifstream file(buf, std::ios::binary);
-		if (!file.is_open()) {
+		buf = file_reader(open(buf.c_str(), O_RDONLY), 4096, [&]{
 			keyd_log("Unable to open %s\n", buf.c_str());
+			perror("open");
+		});
+
+		if (buf.empty())
 			return;
-		}
-		buf.assign(std::istreambuf_iterator(file), std::istreambuf_iterator<char>());
 
 		for (auto ent = configs.get(); ent; ent = ent->next.get()) {
 			ent->kbd->config.cfg_use_uid = env->uid;
@@ -527,16 +522,16 @@ static void handle_client(::listener con)
 	::config ephemeral_config;
 	ephemeral_config.cfg_use_gid = cred.gid;
 	ephemeral_config.cfg_use_uid = cred.uid;
-	static std::shared_ptr<env_pack> prev = nullptr;
+	std::shared_ptr<env_pack> prev = nullptr;
 	if (!prev || prev->uid != cred.uid || prev->gid != cred.gid)
 		prev.reset();
 	if (getuid() < 1000)
 	{
 		// Copy initial environment variables from caller process
-		std::ifstream envf(("/proc/" + std::to_string(cred.pid) + "/environ").c_str(), std::ios::binary);
-		if (envf.is_open()) {
-			std::vector<char> buf;
-			buf.assign(std::istreambuf_iterator<char>(envf), std::istreambuf_iterator<char>());
+		std::vector<char> buf = file_reader(open(concat("/proc/", cred.pid, "/environ").c_str(), O_RDONLY), 8192, [] {
+			perror("environ");
+		});
+		if (!buf.empty()) {
 			if (prev && prev->buf == buf) {
 				// Share previous environment variables
 				ephemeral_config.env = prev;
@@ -559,6 +554,7 @@ static void handle_client(::listener con)
 
 	size_t msg_count = 0;
 	while (handle_message(con, &ephemeral_config, prev ? prev : std::make_shared<env_pack>())) {
+		ephemeral_config.commands.clear();
 		msg_count++;
 	}
 	dbg2("%zu messages processed", msg_count);
@@ -655,13 +651,11 @@ static int event_handler(struct event *ev)
 				break;
 			}
 		} else if (ev->dev->is_virtual && ev->devev->type == DEV_LED) {
-			size_t i;
-
 			/*
 			 * Propagate LED events received by the virtual device from userspace
 			 * to all grabbed devices.
 			 */
-			for (i = 0; i < device_table_sz; i++) {
+			for (size_t i = 0; i < device_table.size(); i++) {
 				::device& dev = device_table[i];
 				if (dev.data && (dev.capabilities & CAP_LEDS)) {
 					struct keyboard* kbd = (struct keyboard*)dev.data;
@@ -708,11 +702,15 @@ static int event_handler(struct event *ev)
 	return timeout;
 }
 
+#ifndef VERSION
+#define VERSION "unknown"
+#endif
+
 int run_daemon(int, char *[])
 {
-	ipcfd = ipc_create_server(/* SOCKET_PATH */);
+	ipcfd = ipc_create_server();
 	if (ipcfd < 0)
-		die("failed to create %s (another instance already running?)", SOCKET_PATH);
+		die("failed to create socket (another instance already running?)");
 
 	vkbd = vkbd_init(VKBD_NAME);
 

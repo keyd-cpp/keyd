@@ -33,10 +33,6 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 				err("incomplete macro command found");
 				return -1;
 			}
-			if (is_cmd && !config) {
-				err("commands are not allowed in this context");
-				return -1;
-			}
 			if (is_cmd && config->commands.size() > std::numeric_limits<decltype(descriptor_arg::idx)>::max()) {
 				err("max commands exceeded");
 				return -1;

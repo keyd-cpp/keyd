@@ -38,12 +38,10 @@ int event_handler(struct event *ev)
 	const char *name;
 
 	case EV_DEV_ADD:
-		keyd_log("device added: %s %s (%s)\n",
-			  ev->dev->id, ev->dev->name, ev->dev->path);
+		keyd_log("device added: %s %s (/dev/input/event%u)\n", ev->dev->id, ev->dev->name, ev->dev->num);
 		break;
 	case EV_DEV_REMOVE:
-		keyd_log("device removed: %s %s (%s)\n",
-			  ev->dev->id, ev->dev->name, ev->dev->path);
+		keyd_log("device removed: %s %s (/dev/input/event%u)\n", ev->dev->id, ev->dev->name, ev->dev->num);
 		break;
 	case EV_DEV_EVENT:
 		switch (ev->devev->type) {

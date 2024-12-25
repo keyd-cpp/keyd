@@ -7,13 +7,12 @@
 #define DEVICE_H
 
 #include <stdint.h>
+#include <array>
 
 #define CAP_MOUSE	0x1
 #define CAP_MOUSE_ABS	0x2
 #define CAP_KEYBOARD	0x4
 #define CAP_LEDS	0x8
-
-#define MAX_DEVICES	64
 
 struct device {
 	/*
@@ -22,15 +21,15 @@ struct device {
 	 */
 	int fd;
 
-	uint8_t grabbed;
-	uint8_t capabilities;
-	uint8_t is_virtual;
+	uint8_t grabbed : 1;
+	uint8_t is_virtual : 1;
+	uint8_t capabilities : 6;
+
+	char id[23];
+	uint32_t num;
+	char name[96];
 
 	uint8_t led_state[LED_CNT];
-
-	char id[64];
-	char name[64];
-	char path[256];
 
 	/* Internal. */
 	uint32_t _maxx;
@@ -68,7 +67,7 @@ struct device_event {
 
 struct device_event *device_read_event(struct device *dev);
 
-int device_scan(struct device devices[MAX_DEVICES]);
+void device_scan(std::vector<device>& devices);
 int device_grab(struct device *dev);
 int device_ungrab(struct device *dev);
 

@@ -8,6 +8,10 @@
 
 /* TODO (maybe): settle on an API and publish the protocol. */
 
+#ifndef SOCKET_PATH
+#define SOCKET_PATH "/var/run/keyd.socket"
+#endif
+
 static void chgid()
 {
 	struct group *g = getgrnam("keyd");

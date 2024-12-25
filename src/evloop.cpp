@@ -2,11 +2,8 @@
 
 #define MAX_AUX_FDS 32
 
-static int aux_fds[MAX_AUX_FDS];
-static size_t nr_aux_fds = 0;
-
-struct device device_table[MAX_DEVICES];
-size_t device_table_sz;
+static int aux_fd = -1;
+std::vector<device> device_table;
 
 static void panic_check(uint8_t code, uint8_t pressed)
 {
@@ -40,14 +37,14 @@ int evloop(int (*event_handler) (struct event *ev))
 	int timeout = 0;
 	int monfd;
 
-	struct pollfd pfds[MAX_DEVICES+MAX_AUX_FDS+1];
+	struct pollfd pfds[130]{}; // TODO: fix hard limit but calling poll with too many descriptors is inefficient anyway
 
-	struct event ev;
+	struct event ev{};
 
 	monfd = devmon_create();
-	device_table_sz = device_scan(device_table);
+	device_scan(device_table);
 
-	for (i = 0; i < device_table_sz; i++) {
+	for (i = 0; i < device_table.size(); i++) {
 		ev.type = EV_DEV_ADD;
 		ev.dev = &device_table[i];
 
@@ -55,12 +52,18 @@ int evloop(int (*event_handler) (struct event *ev))
 	}
 
 	bool monitor = true;
-	for (i = 0; i < device_table_sz; i++) {
+	for (i = 0; i < device_table.size(); i++) {
 		if (device_table[i].grabbed) {
 			monitor = false;
 			break;
 		}
 	}
+
+	pfds[0].fd = monfd;
+	pfds[0].events = POLLIN;
+	pfds[1].fd = aux_fd;
+	pfds[1].events = POLLIN;
+	auto pfdsd = pfds + 2;
 
 	while (1) {
 		int removed = 0;
@@ -68,25 +71,20 @@ int evloop(int (*event_handler) (struct event *ev))
 		int start_time;
 		int elapsed;
 
-		pfds[0].fd = monfd;
-		pfds[0].events = POLLIN;
-
-		for (i = 0; i < device_table_sz; i++) {
-			pfds[i+1].fd = device_table[i].fd;
-			pfds[i+1].events = 0;
+		for (i = 0; i < device_table.size(); i++) {
+			if (i == std::size(pfds) - (pfdsd - pfds)) {
+				break;
+			}
+			pfdsd[i].fd = device_table[i].fd;
+			pfdsd[i].events = 0;
 			if (monitor || device_table[i].grabbed)
-				pfds[i+1].events = POLLIN;
+				pfdsd[i].events = POLLIN;
 			else if (device_table[i].capabilities & CAP_KEYBOARD && device_table[i].is_virtual)
-				pfds[i+1].events = POLLIN;
-		}
-
-		for (i = 0; i < nr_aux_fds; i++) {
-			pfds[i+device_table_sz+1].fd = aux_fds[i];
-			pfds[i+device_table_sz+1].events = POLLIN | POLLERR;
+				pfdsd[i].events = POLLIN;
 		}
 
 		start_time = get_time_ms();
-		poll(pfds, device_table_sz+nr_aux_fds+1, timeout > 0 ? timeout : -1);
+		poll(pfds, i + (pfdsd - pfds), timeout > 0 ? timeout : -1);
 		ev.timestamp = get_time_ms();
 		elapsed = ev.timestamp - start_time;
 
@@ -99,11 +97,12 @@ int evloop(int (*event_handler) (struct event *ev))
 			timeout -= elapsed;
 		}
 
-		for (i = 0; i < device_table_sz; i++) {
-			if (pfds[i+1].revents) {
+		// Count backwards
+		for (; i + 1; i--) {
+			if (pfdsd[i].revents) {
 				struct device_event *devev = nullptr;
 
-				while ((pfds[i+1].revents & (POLLERR | POLLHUP)) || (devev = device_read_event(&device_table[i]))) {
+				while ((pfdsd[i].revents & (POLLERR | POLLHUP)) || (devev = device_read_event(&device_table[i]))) {
 					if (!devev || devev->type == DEV_REMOVED) {
 						ev.type = EV_DEV_REMOVE;
 						ev.dev = &device_table[i];
@@ -128,12 +127,10 @@ int evloop(int (*event_handler) (struct event *ev))
 			}
 		}
 
-		for (i = 0; i < nr_aux_fds; i++) {
-			short events = pfds[i+device_table_sz+1].revents;
-
-			if (events) {
+		{
+			if (auto events = pfds[1].revents) {
 				ev.type = events & POLLERR ? EV_FD_ERR : EV_FD_ACTIVITY;
-				ev.fd = aux_fds[i];
+				ev.fd = aux_fd;
 
 				timeout = event_handler(&ev);
 			}
@@ -144,23 +141,22 @@ int evloop(int (*event_handler) (struct event *ev))
 			struct device dev;
 
 			while (devmon_read_device(monfd, &dev) == 0) {
-				assert(device_table_sz < MAX_DEVICES);
-				device_table[device_table_sz++] = dev;
+				if (device_table.size() >= std::size(pfds) - 2) {
+					err("Too many devices, some of them will be ignored.");
+				}
+				device_table.emplace_back(std::move(dev));
 
 				ev.type = EV_DEV_ADD;
-				ev.dev = &device_table[device_table_sz-1];
+				ev.dev = &device_table.back();
 
 				timeout = event_handler(&ev);
 			}
 		}
 
 		if (removed) {
-			size_t n = 0;
-			for (i = 0; i < device_table_sz; i++) {
-				if (device_table[i].fd != -1)
-					device_table[n++] = device_table[i];
-			}
-			device_table_sz = n;
+			std::erase_if(device_table, [](device& dev) {
+				return dev.fd < 0;
+			});
 		}
 
 	}
@@ -170,6 +166,6 @@ int evloop(int (*event_handler) (struct event *ev))
 
 void evloop_add_fd(int fd)
 {
-	assert(nr_aux_fds < MAX_AUX_FDS);
-	aux_fds[nr_aux_fds++] = fd;
+	assert(aux_fd < 0);
+	aux_fd = fd;
 }

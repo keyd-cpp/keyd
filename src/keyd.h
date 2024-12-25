@@ -103,7 +103,55 @@ bool xread(int fd, void *buf, size_t sz);
 int ipc_create_server();
 int ipc_connect();
 
-extern struct device device_table[MAX_DEVICES];
-extern size_t device_table_sz;
+// One-time file reader
+struct file_reader
+{
+	explicit file_reader(int fd, unsigned reserve, auto on_fail)
+		: fd(fd)
+		, reserve(reserve)
+	{
+		if (fd < 0) {
+			on_fail();
+		}
+	}
+
+	file_reader(const file_reader&) = delete;
+	file_reader& operator=(const file_reader&) = delete;
+
+	// Read full file
+	template <typename T, typename V = typename T::value_type, typename = typename T::allocator_type>
+	operator T()
+	{
+		static_assert(sizeof(V) == 1);
+		T result;
+		size_t rd = 0;
+		if (fd < 0) [[unlikely]]
+			return result;
+		while (true) {
+			const size_t new_size = rd + 4096;
+			result.resize(new_size, 0);
+			const auto rv = read(this->fd, result.data() + rd, new_size - rd);
+			result.resize(rv < 0 ? 0 : (rd += rv));
+			if (rv <= 0)
+				break;
+		}
+		return result;
+	}
+
+	void reset()
+	{
+		if (fd >= 0 && lseek(fd, 0, SEEK_SET) < 0)
+			perror("file_reader::lseek");
+	}
+
+	~file_reader()
+	{
+		if (fd >= 0)
+			close(fd);
+	}
+private:
+	int fd;
+	unsigned reserve;
+};
 
 #endif

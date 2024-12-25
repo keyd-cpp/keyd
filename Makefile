@@ -39,6 +39,8 @@ CXXFLAGS:=-DVERSION=\"v$(VERSION)\ \($(COMMIT)\)\" \
 	-D_FORTIFY_SOURCE=2 \
 	-D_DEFAULT_SOURCE \
 	-Werror=format-security \
+	-fdata-sections -ffunction-sections \
+	-static-libgcc -static-libstdc++\
 	$(CXXFLAGS)
 
 platform=$(shell uname -s)
@@ -53,7 +55,7 @@ endif
 all: compose man
 	mkdir -p bin
 	cp scripts/keyd-application-mapper bin/
-	$(CXX) $(CXXFLAGS) -O3 $(COMPAT_FILES) src/*.cpp src/vkbd/$(VKBD).cpp -lpthread -o bin/keyd $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) -O3 $(COMPAT_FILES) src/*.cpp src/vkbd/$(VKBD).cpp -lpthread -Wl,--gc-sections -o bin/keyd $(LDFLAGS)
 debug:
 	CFLAGS="-g -fsanitize=address -Wunused" $(MAKE)
 compose:

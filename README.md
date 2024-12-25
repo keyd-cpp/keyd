@@ -88,8 +88,8 @@ cd keyd
 export CXX=clang++-18
 # First time install
 make && sudo make install && sudo systemctl enable --now keyd
-# Second time install (update, contains **example** flags for statically linking libstdc++)
-CXX=clang++-18 CXXFLAGS='-static-libgcc -static-libstdc++' make && sudo make install && sudo systemctl daemon-reload && sudo systemctl restart keyd
+# Second time install (update example)
+CXX=clang++-18 make && sudo make install && sudo systemctl daemon-reload && sudo systemctl restart keyd
 ```
 
 # Quickstart

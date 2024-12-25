@@ -8,6 +8,7 @@
 
 #include <stdio.h>
 #include <pthread.h>
+#include <sys/single_threaded.h>
 #include <string.h>
 #include <sys/types.h>
 #include <dirent.h>
@@ -128,7 +129,7 @@ uint32_t generate_uid(uint32_t num_keys, uint8_t absmask, uint8_t relmask, const
 	return hash;
 }
 
-static int device_init(const char *path, struct device *dev)
+static int device_init(struct device *dev)
 {
 	int fd;
 	int capabilities;
@@ -137,15 +138,16 @@ static int device_init(const char *path, struct device *dev)
 	uint8_t absmask;
 	struct input_absinfo absinfo;
 
-	if ((fd = open(path, O_RDWR | O_NONBLOCK | O_CLOEXEC, 0600)) < 0) {
-		keyd_log("failed to open %s\n", path);
+	auto path = concat("/dev/input/event", dev->num);
+	if ((fd = open(path.c_str(), O_RDWR | O_NONBLOCK | O_CLOEXEC, 0600)) < 0) {
+		keyd_log("failed to open %s\n", path.c_str());
 		return -1;
 	}
 
 	capabilities = resolve_device_capabilities(fd, &num_keys, &relmask, &absmask);
 
-	if (ioctl(fd, EVIOCGNAME(sizeof(dev->name)), dev->name) == -1) {
-		keyd_log("ERROR: could not fetch device name of %s\n", dev->path);
+	if (ioctl(fd, EVIOCGNAME(sizeof(dev->name) - 1), dev->name) == -1) {
+		keyd_log("ERROR: could not fetch device name of /dev/input/event%u\n", dev->num);
 		return -1;
 	}
 
@@ -167,7 +169,7 @@ static int device_init(const char *path, struct device *dev)
 		dev->_maxy = absinfo.maximum;
 	}
 
-	dbg2("capabilities of %s (%s): %x", path, dev->name, capabilities);
+	dbg2("capabilities of %s (%s): %x", path.c_str(), dev->name, capabilities);
 
 	if (capabilities) {
 		struct input_id info;
@@ -177,9 +179,6 @@ static int device_init(const char *path, struct device *dev)
 			return -1;
 		}
 
-		strncpy(dev->path, path, sizeof(dev->path)-1);
-		dev->path[sizeof(dev->path)-1] = 0;
-
 		/*
 		 * Attempt to generate a reproducible unique identifier for each device.
 		 * The product and vendor ids are insufficient to identify some devices since
@@ -188,7 +187,7 @@ static int device_init(const char *path, struct device *dev)
 		 * to further distinguish between input devices. These should be regarded as
 		 * opaque identifiers by the user.
 		 */
-		snprintf(dev->id, sizeof dev->id, "%04x:%04x:%08x", info.vendor, info.product, generate_uid(num_keys, absmask, relmask, dev->name));
+		snprintf(dev->id, sizeof(dev->id) - 1, "%04x:%04x:%08x", info.vendor, info.product, generate_uid(num_keys, absmask, relmask, dev->name));
 
 		dev->fd = fd;
 		dev->capabilities = capabilities;
@@ -207,53 +206,60 @@ static int device_init(const char *path, struct device *dev)
 
 struct device_worker {
 	pthread_t tid;
-	char path[1024];
 	struct device dev;
 };
 
 static void *device_scan_worker(void *arg)
 {
 	struct device_worker *w = (struct device_worker *)arg;
-	if (device_init(w->path, &w->dev) < 0)
+	if (device_init(&w->dev) < 0)
 		return NULL;
 
 	return &w->dev;
 }
 
-int device_scan(struct device devices[MAX_DEVICES])
+void device_scan(std::vector<device>& devices)
 {
-	int i;
-	struct device_worker workers[MAX_DEVICES];
-	struct dirent *ent;
+	devices.clear();
+	struct device_worker workers[16]; // Ring buffer
 	DIR *dh = opendir("/dev/input/");
-	int n = 0, ndevs;
+	size_t n = 0;
 
 	if (!dh) {
 		perror("opendir /dev/input");
 		exit(-1);
 	}
 
-	while((ent = readdir(dh))) {
-		if (ent->d_type != DT_DIR && !strncmp(ent->d_name, "event", 5)) {
-			assert(n < MAX_DEVICES);
-			struct device_worker *w = &workers[n++];
+	const char single_threaded = __libc_single_threaded;
 
-			snprintf(w->path, sizeof(w->path), "/dev/input/%s", ent->d_name);
+	auto join = [&] (size_t n) {
+		struct device *d;
+		struct device_worker *w = &workers[n % std::size(workers)];
+		pthread_join(w->tid, (void**)&d);
+		if (d)
+			devices.emplace_back(std::move(w->dev));
+	};
+
+	while (struct dirent* ent = readdir(dh)) {
+		if (ent->d_type != DT_DIR && !strncmp(ent->d_name, "event", 5)) {
+			struct device_worker *w = &workers[n % std::size(workers)];
+			if (n >= std::size(workers)) {
+				join(n);
+			}
+
+			w->dev = {};
+			w->dev.num = atoi(ent->d_name + 5);
 			pthread_create(&w->tid, NULL, device_scan_worker, w);
+			n++;
 		}
 	}
 
-	ndevs = 0;
-	for(i = 0; i < n; i++) {
-		struct device *d;
-		pthread_join(workers[i].tid, (void**)&d);
-
-		if (d)
-			devices[ndevs++] = workers[i].dev;
+	for (size_t i = n % std::size(workers); i < n; i++) {
+		join(i);
 	}
 
 	closedir(dh);
-	return ndevs;
+	__libc_single_threaded = single_threaded;
 }
 
 /*
@@ -293,7 +299,6 @@ int devmon_read_device(int fd, struct device *dev)
 	static char *ptr = buf;
 
 	while (1) {
-		char path[1024];
 		struct inotify_event *ev;
 
 		if (ptr >= (buf+buf_sz)) {
@@ -311,9 +316,8 @@ int devmon_read_device(int fd, struct device *dev)
 		if (strncmp(ev->name, "event", 5))
 			continue;
 
-		snprintf(path, sizeof path, "/dev/input/%s", ev->name);
-
-		if (!device_init(path, dev))
+		dev->num = atoi(ev->name + 5);
+		if (!device_init(dev))
 			return 0;
 	}
 }

@@ -135,6 +135,11 @@ struct ucmd {
 	std::shared_ptr<env_pack> env = nullptr;
 };
 
+struct dev_id {
+	uint8_t flags;
+	std::array<char, 23> id;
+};
+
 struct config {
 	std::string pathstr;
 	std::vector<layer> layers;
@@ -150,13 +155,7 @@ struct config {
 	gid_t cfg_use_gid = 0;
 	std::shared_ptr<env_pack> env;
 
-	uint8_t wildcard;
-	struct {
-		char id[64];
-		uint8_t flags;
-	} ids[64];
-
-	size_t nr_ids;
+	std::vector<dev_id> ids;
 
 	long macro_timeout;
 	long macro_sequence_timeout;
@@ -168,6 +167,7 @@ struct config {
 	long chord_interkey_timeout;
 	long chord_hold_timeout;
 
+	uint8_t wildcard = 0;
 	uint8_t layer_indicator = 255;
 	uint8_t disable_modifier_guard;
 	std::string default_layout;
@@ -175,6 +175,7 @@ struct config {
 	config() = default;
 	config(const config&) = delete;
 	config& operator=(const config&) = delete;
+	~config();
 };
 
 struct config_backup {
@@ -191,6 +192,7 @@ struct config_backup {
 	std::vector<layer_backup> layers;
 
 	explicit config_backup(const struct config& cfg);
+	~config_backup();
 
 	void restore(struct config& cfg);
 };

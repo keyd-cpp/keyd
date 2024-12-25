@@ -26,8 +26,6 @@
 #include <limits>
 #include <string>
 #include <string_view>
-#include <iostream>
-#include <fstream>
 #include <algorithm>
 #include <numeric>
 
@@ -186,40 +184,33 @@ static std::string resolve_include_path(const char *path, std::string_view inclu
 	return resolved_path;
 }
 
-static std::string read_file(const char *path)
+static std::string read_file(const char *path, size_t recursion_depth = 0)
 {
-	constexpr std::string_view include_prefix = "include ";
+	std::string buf;
 
-	std::string buf, line;
-
-	std::ifstream file(path);
-	if (!file.is_open()) {
+	std::string file = file_reader(open(path, O_RDONLY), 4096, [&] {
 		err("failed to open %s", path);
-		return {};
-	}
+		perror("open");
+	});
 
-	while (std::getline(file, line)) {
-		if (line.starts_with(include_prefix)) {
-			std::string_view include_path = line;
-			include_path.remove_prefix(include_prefix.size());
-			while (include_path.starts_with(' '))
-				include_path.remove_prefix(1);
+	for (auto line : split_char<'\n'>(file)) {
+		if (line.starts_with("include ") || line.starts_with("include\t")) {
+			auto include_path = line.substr(8);
 
-			auto resolved_path = resolve_include_path(path, include_path);
+			std::string resolved_path = resolve_include_path(path, include_path);
 			if (resolved_path.empty()) {
-				warn("failed to resolve include path: %s", include_path.data());
+				warn("failed to resolve include path: %.*s", (int)include_path.size(), include_path.data());
 				continue;
 			}
 
-			std::ifstream file(resolved_path);
-			if (!file.is_open()) {
-				warn("failed to %s", line.c_str());
-				perror("open");
-			} else {
-				buf.append(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+			if (recursion_depth >= 10) {
+				warn("include depth too big or cyclic: %.*s", (int)include_path.size(), include_path.data());
+				continue;
 			}
+
+			buf += read_file(resolved_path.c_str(), recursion_depth + 1);
 		} else {
-			buf += line;
+			buf.append(line);
 			buf += '\n';
 		}
 	}
@@ -797,29 +788,40 @@ static void parse_id_section(struct config *config, struct ini_section *section)
 			config->wildcard |= CAP_KEYBOARD;
 		} else if (s.starts_with("a:*")) {
 			config->wildcard |= CAP_MOUSE_ABS;
-		} else if (s.starts_with("m:") || s.starts_with("a:")) {
-			assert(config->nr_ids < ARRAY_SIZE(config->ids));
-			config->ids[config->nr_ids].flags = ID_MOUSE | (s[0] == 'a' ? ID_ABS_PTR : 0);
+		}
+		continue;
 
-			snprintf(config->ids[config->nr_ids++].id, sizeof(config->ids[0].id), "%s", ent->key + 2);
-		} else if (s.starts_with("k:")) {
-			assert(config->nr_ids < ARRAY_SIZE(config->ids));
-			config->ids[config->nr_ids].flags = ID_KEYBOARD;
-
-			snprintf(config->ids[config->nr_ids++].id, sizeof(config->ids[0].id), "%s", ent->key + 2);
-		} else if (s.starts_with('-')) {
-			assert(config->nr_ids < ARRAY_SIZE(config->ids));
-			config->ids[config->nr_ids].flags = ID_EXCLUDED;
-
-			snprintf(config->ids[config->nr_ids++].id, sizeof(config->ids[0].id), "%s", ent->key + 1);
-		} else if (s.size() < sizeof(config->ids[config->nr_ids].id) - 1) {
-			assert(config->nr_ids < ARRAY_SIZE(config->ids));
-			config->ids[config->nr_ids].flags = ID_KEYBOARD | ID_MOUSE;
-
-			snprintf(config->ids[config->nr_ids++].id, sizeof(config->ids[0].id), "%s", ent->key);
+		if ((s.starts_with("m:") || s.starts_with("a:")) && s.size() - 2 <= sizeof(dev_id::id) - 3) {
+			config->ids.push_back({
+				.flags = ID_MOUSE,
+				.id = {}
+			});
+			if (s[0] == 'a')
+				config->ids.back().flags |= ID_ABS_PTR;
+			s.remove_prefix(2);
+		} else if (s.starts_with("k:") && s.size() - 2 <= sizeof(dev_id::id) - 3) {
+			config->ids.push_back({
+				.flags = ID_KEYBOARD,
+				.id = {}
+			});
+			s.remove_prefix(2);
+		} else if (s.starts_with('-') && s.size() - 1 <= sizeof(dev_id::id) - 2) {
+			config->ids.push_back({
+				.flags = ID_EXCLUDED,
+				.id = {}
+			});
+			s.remove_prefix(1);
+		} else if (s.size() - 0 < sizeof(dev_id::id) - 1) {
+			config->ids.push_back({
+				.flags = ID_KEYBOARD | ID_MOUSE,
+				.id = {}
+			});
 		} else {
 			warn("%s is not a valid device id", s);
+			continue;
 		}
+
+		memcpy(config->ids.back().id.data(), s.data(), s.size());
 	}
 }
 
@@ -972,11 +974,9 @@ int config_parse(struct config *config, const char *path)
 
 int config_check_match(struct config *config, const char *id, uint8_t flags)
 {
-	size_t i;
-
-	for (i = 0; i < config->nr_ids; i++) {
+	for (size_t i = 0; i < config->ids.size(); i++) {
 		//Prefix match to allow matching <product>:<vendor> for backward compatibility.
-		if (strstr(id, config->ids[i].id) == id) {
+		if (strstr(id, config->ids[i].id.data()) == id) {
 			if (config->ids[i].flags & ID_EXCLUDED) {
 				return 0;
 			} else if (config->ids[i].flags & flags) {
@@ -1100,4 +1100,12 @@ void config_backup::restore(struct config& cfg)
 	cfg.descriptors.resize(descriptor_count);
 	cfg.macros.resize(macro_count);
 	cfg.commands.resize(cmd_count);
+}
+
+config::~config()
+{
+}
+
+config_backup::~config_backup()
+{
 }
