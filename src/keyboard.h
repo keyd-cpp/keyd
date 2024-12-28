@@ -19,20 +19,20 @@
 struct keyboard;
 
 struct cache_entry {
-	uint8_t code;
+	uint16_t code;
 	struct descriptor d;
 	int dl;
 	int layer;
 };
 
 struct key_event {
-	uint8_t code;
-	uint8_t pressed;
+	uint32_t code;
+	uint32_t pressed;
 	int timestamp;
 };
 
 struct output {
-	void (*send_key) (uint8_t code, uint8_t state);
+	void (*send_key) (uint16_t code, uint8_t state);
 	void (*on_layer_change) (const struct keyboard *kbd, struct layer *layer, uint8_t active);
 };
 
@@ -72,12 +72,12 @@ struct keyboard {
 	 */
 	struct cache_entry cache[CACHE_SIZE];
 
-	uint8_t last_pressed_output_code;
-	uint8_t last_pressed_code;
+	uint16_t last_pressed_output_code;
+	uint16_t last_pressed_code;
 
-	uint8_t oneshot_latch;
+	uint16_t oneshot_latch;
 
-	uint8_t inhibit_modifier_guard;
+	uint16_t inhibit_modifier_guard;
 
 	::macro* active_macro;
 	int active_macro_layer;
@@ -104,14 +104,14 @@ struct keyboard {
 		const struct chord *match;
 		int match_layer;
 
-		uint8_t start_code;
+		uint16_t start_code;
 		long last_code_time;
 
 		enum chord_state_e state;
 	} chord;
 
 	struct {
-		uint8_t code;
+		uint16_t code;
 		uint8_t dl;
 		long expire;
 		long tap_expiry;
@@ -134,7 +134,7 @@ struct keyboard {
 	};
 	std::vector<layer_state_t> layer_state;
 
-	uint8_t keystate[256];
+	std::array<uint8_t, KEYD_ENTRY_COUNT> keystate;
 
 	struct {
 		int x;

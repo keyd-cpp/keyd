@@ -8,6 +8,12 @@
 #include "keys.h"
 #include <array>
 
+#ifdef __FreeBSD__
+	#include <dev/evdev/input.h>
+#else
+	#include <linux/input.h>
+#endif
+
 const struct modifier modifiers[MAX_MOD] = {
 	{MOD_ALT, KEYD_LEFTALT},
 	{MOD_ALT_GR, KEYD_RIGHTALT},
@@ -16,8 +22,8 @@ const struct modifier modifiers[MAX_MOD] = {
 	{MOD_CTRL, KEYD_LEFTCTRL},
 };
 
-extern constexpr std::array<keycode_table_ent, 256> keycode_table = []() {
-	std::array<keycode_table_ent, 256> r{};
+extern constexpr std::array<keycode_table_ent, KEYD_ENTRY_COUNT> keycode_table = []() {
+	std::array<keycode_table_ent, KEYD_ENTRY_COUNT> r{};
 	r[KEYD_ESC] = { "esc", "escape", NULL },
 	r[KEYD_1] = { "1", NULL, "!" },
 	r[KEYD_2] = { "2", NULL, "@" },
@@ -47,7 +53,7 @@ extern constexpr std::array<keycode_table_ent, 256> keycode_table = []() {
 	r[KEYD_RIGHTBRACE] = { "]", "rightbrace", "}" },
 	r[KEYD_ENTER] = { "enter", "\n", NULL },
 	r[KEYD_LEFTCTRL] = { "leftcontrol", "leftctrl", NULL },
-	r[KEYD_IS_LEVEL3_SHIFT] = { "iso-level3-shift", NULL, NULL }, //Oddly missing from input-event-codes.h, appears to be used as altgr in an english keymap on X
+	r[KEYD_IS_LEVEL3_SHIFT] = { "iso-level3-shift", "level3", NULL },
 	r[KEYD_A] = { "a", NULL, "A" },
 	r[KEYD_S] = { "s", NULL, "S" },
 	r[KEYD_D] = { "d", NULL, "D" },
@@ -60,7 +66,7 @@ extern constexpr std::array<keycode_table_ent, 256> keycode_table = []() {
 	r[KEYD_SEMICOLON] = { ";", "semicolon", ":" },
 	r[KEYD_APOSTROPHE] = { "'", "apostrophe", "\"" },
 	r[KEYD_GRAVE] = { "`", "grave", "~" },
-	r[KEYD_LEFTSHIFT] = { "leftshift", "", NULL },
+	r[KEYD_LEFTSHIFT] = { "leftshift", nullptr, NULL },
 	r[KEYD_BACKSLASH] = { "\\", "backslash", "|" },
 	r[KEYD_Z] = { "z", NULL, "Z" },
 	r[KEYD_X] = { "x", NULL, "X" },
@@ -74,7 +80,7 @@ extern constexpr std::array<keycode_table_ent, 256> keycode_table = []() {
 	r[KEYD_SLASH] = { "/", "slash", "?" },
 	r[KEYD_RIGHTSHIFT] = { "rightshift", NULL, NULL },
 	r[KEYD_KPASTERISK] = { "kpasterisk", NULL, NULL },
-	r[KEYD_LEFTALT] = { "leftalt", "", NULL },
+	r[KEYD_LEFTALT] = { "leftalt", nullptr, NULL },
 	r[KEYD_SPACE] = { "space", " ", NULL },
 	r[KEYD_CAPSLOCK] = { "capslock", NULL, NULL },
 	r[KEYD_F1] = { "f1", NULL, NULL },
@@ -266,10 +272,16 @@ extern constexpr std::array<keycode_table_ent, 256> keycode_table = []() {
 	r[KEYD_MOUSE_2] = { "mouse2", NULL, NULL },
 	r[KEYD_MOUSE_BACK] = { "mouseback", NULL, NULL },
 	r[KEYD_MOUSE_FORWARD] = { "mouseforward", NULL, NULL },
-	r[KEYD_FN] = { "fn", NULL, NULL },
-	r[KEYD_ZOOM] = { "zoom", NULL, NULL },
-	r[KEYD_NOOP] = { "noop", NULL, NULL },
+	r[KEYD_NOOP] = { "noop", NULL, NULL };
+	r[KEY_FN] = { "fn", NULL, NULL },
+	r[KEY_ZOOM] = { "zoom", NULL, NULL },
 	void();
+
+	for (size_t i = 1; i < KEYD_ENTRY_COUNT; i++) {
+		r[i].key_num[4] = '0' + (i / 100) % 10;
+		r[i].key_num[5] = '0' + (i / 10) % 10;
+		r[i].key_num[6] = '0' + (i % 10);
+	}
 	return r;
 }();
 
@@ -347,7 +359,7 @@ int parse_modset(const char *s, uint8_t *mods)
 	return 0;
 }
 
-int parse_key_sequence(std::string_view s, uint8_t *codep, uint8_t *modsp)
+int parse_key_sequence(std::string_view s, uint16_t* codep, uint8_t *modsp)
 {
 	auto c = s;
 	if (s.empty())
@@ -380,10 +392,10 @@ int parse_key_sequence(std::string_view s, uint8_t *codep, uint8_t *modsp)
 		c.remove_prefix(2);
 	}
 
-	for (size_t i = 0; i < 256; i++) {
+	for (size_t i = 0; i < KEYD_KEY_COUNT; i++) {
 		const struct keycode_table_ent *ent = &keycode_table[i];
 
-		if (ent->name) {
+		if (true) {
 			if (ent->shifted_name && ent->shifted_name == c) {
 
 				mods |= MOD_SHIFT;
@@ -395,7 +407,7 @@ int parse_key_sequence(std::string_view s, uint8_t *codep, uint8_t *modsp)
 					*codep = i;
 
 				return 0;
-			} else if (ent->name == c || (ent->alt_name && ent->alt_name == c)) {
+			} else if (ent->name() == c || (ent->alt_name && ent->alt_name == c)) {
 
 				if (modsp)
 					*modsp = mods;

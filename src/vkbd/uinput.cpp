@@ -72,8 +72,8 @@ static int create_virtual_keyboard(const char *name)
 		exit(-1);
 	}
 
-	for (code = 0; code < 256; code++) {
-		if (keycode_table[code].name) {
+	for (code = 0; code < KEY_CNT; code++) {
+		if (true) {
 			if (ioctl(fd, UI_SET_KEYBIT, code)) {
 				perror("ioctl set_keybit");
 				exit(-1);
@@ -165,7 +165,7 @@ static int create_virtual_pointer(const char *name)
 	return fd;
 }
 
-static void write_key_event(const struct vkbd *vkbd, uint8_t code, int state)
+static void write_key_event(const struct vkbd *vkbd, uint16_t code, int state)
 {
 	struct input_event ev;
 	int fd;
@@ -174,20 +174,19 @@ static void write_key_event(const struct vkbd *vkbd, uint8_t code, int state)
 	fd = vkbd->fd;
 
 	ev.type = EV_KEY;
+	ev.code = code;
 
 	is_btn = 1;
 	switch (code) {
-		case KEYD_LEFT_MOUSE:	 ev.code = BTN_LEFT; break;
-		case KEYD_MIDDLE_MOUSE:	 ev.code = BTN_MIDDLE; break;
-		case KEYD_RIGHT_MOUSE:	 ev.code = BTN_RIGHT; break;
-		case KEYD_MOUSE_1:	 ev.code = BTN_SIDE; break;
-		case KEYD_MOUSE_2:	 ev.code = BTN_EXTRA; break;
-		case KEYD_MOUSE_BACK:	 ev.code = BTN_BACK; break;
-		case KEYD_MOUSE_FORWARD: ev.code = BTN_FORWARD; break;
-		case KEYD_ZOOM:		 ev.code = KEY_ZOOM; is_btn = 0; break;
-		case KEYD_VOICECOMMAND: ev.code = KEY_VOICECOMMAND; is_btn = 0; break;
+		case KEYD_LEFT_MOUSE:
+		case KEYD_MIDDLE_MOUSE:
+		case KEYD_RIGHT_MOUSE:
+		case KEYD_MOUSE_1:
+		case KEYD_MOUSE_2:
+		case KEYD_MOUSE_BACK:
+		case KEYD_MOUSE_FORWARD:
+			break;
 		default:
-			ev.code = code;
 			is_btn = 0;
 			break;
 	}
@@ -332,9 +331,11 @@ void vkbd_mouse_move_abs(const struct vkbd *vkbd, int x, int y)
 	xwrite(vkbd->pfd, &ev, sizeof(ev));
 }
 
-void vkbd_send_key(const struct vkbd *vkbd, uint8_t code, int state)
+void vkbd_send_key(const struct vkbd *vkbd, uint16_t code, int state)
 {
 	dbg("output %s %s", KEY_NAME(code), state == 1 ? "down" : "up");
 
+	if (code > KEY_MAX)
+		return;
 	write_key_event(vkbd, code, state);
 }

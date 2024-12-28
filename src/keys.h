@@ -21,14 +21,19 @@
 #define MAX_MOD 5
 
 struct keycode_table_ent {
-	const char *name;
+	const char *b_name;
 	const char *alt_name;
 	const char *shifted_name;
+	char key_num[8]{'k', 'e', 'y', '_', '0', '0', '0'};
+
+	constexpr std::string_view name() const {
+		return b_name ? b_name : key_num;
+	}
 };
 
 struct modifier {
 	uint8_t mask;
-	uint8_t key;
+	uint16_t key;
 };
 
 #define KEYD_ESC               1
@@ -274,28 +279,41 @@ struct modifier {
 #define KEYD_RFKILL            247
 #define KEYD_MICMUTE           248
 
-/* These deviate from uinput codes. */
+/* Deviations */
 
-#define  KEYD_NOOP             		195
+#define  KEYD_NOOP                             195
 #define  KEYD_EXTERNAL_MOUSE_BUTTON     196
-#define  KEYD_CHORD_1			197
-#define  KEYD_CHORD_2			198
-#define  KEYD_CHORD_MAX			199
-#define  KEYD_LEFT_MOUSE       		249
-#define  KEYD_MIDDLE_MOUSE     		250
-#define  KEYD_RIGHT_MOUSE		251
-#define  KEYD_MOUSE_1          		252
-#define  KEYD_MOUSE_2          		253
-#define  KEYD_MOUSE_BACK       		178
-#define  KEYD_FN               		254
-#define  KEYD_MOUSE_FORWARD    		255
+#define  KEYD_CHORD_1                  197
+#define  KEYD_CHORD_2                  198
+#define  KEYD_CHORD_MAX                        199
 
-#define KEY_NAME(code) (keycode_table[code].name ? keycode_table[code].name : "UNKNOWN")
+/* Big ones */
+
+#define KEYD_LEFT_MOUSE       		0x110
+#define KEYD_MIDDLE_MOUSE     		0x112
+#define KEYD_RIGHT_MOUSE			0x111
+#define KEYD_MOUSE_1          		0x113
+#define KEYD_MOUSE_2          		0x114
+#define KEYD_MOUSE_BACK       		0x116
+#define KEYD_MOUSE_FORWARD    		0x115
+
+// /* Special values. */
+
+// #define KEYD_NOOP             		0x300
+// #define KEYD_EXTERNAL_MOUSE_BUTTON 0x301
+// #define KEYD_CHORD_1			0x302
+// #define KEYD_CHORD_2			0x303
+// #define KEYD_CHORD_MAX			0x304
+
+#define KEY_NAME(code) (size_t(code) < KEYD_KEY_COUNT ? keycode_table[code].name().data() : "UNKNOWN")
 
 int parse_modset(const char *s, uint8_t *mods);
-int parse_key_sequence(std::string_view, uint8_t *code, uint8_t *mods);
+int parse_key_sequence(std::string_view, uint16_t* code, uint8_t *mods);
+
+#define KEYD_KEY_COUNT				0x300
+#define KEYD_ENTRY_COUNT			1000
 
 extern const struct modifier modifiers[MAX_MOD];
-extern const std::array<keycode_table_ent, 256> keycode_table;
+extern const std::array<keycode_table_ent, KEYD_ENTRY_COUNT> keycode_table;
 
 #endif

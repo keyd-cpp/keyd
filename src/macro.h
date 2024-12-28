@@ -19,8 +19,8 @@ using enum macro_e;
 
 struct macro_entry {
 	enum macro_e type;
-
-	uint16_t data;
+	uint8_t mods;
+	uint16_t code;
 };
 
 /*
@@ -29,7 +29,7 @@ struct macro_entry {
  */
 using macro = std::vector<macro_entry>;
 
-void macro_execute(void (*output)(uint8_t, uint8_t),
+void macro_execute(void (*output)(uint16_t, uint8_t),
 		   const macro& macro,
 		   size_t timeout, struct config* config);
 

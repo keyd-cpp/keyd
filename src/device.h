@@ -57,9 +57,8 @@ using enum dev_event_e;
 
 struct device_event {
 	enum dev_event_e type;
-
-	uint8_t code;
 	uint8_t pressed;
+	uint16_t code;
 	uint32_t x;
 	uint32_t y;
 };

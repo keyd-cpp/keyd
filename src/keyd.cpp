@@ -84,19 +84,31 @@ static int help(int, char *[])
 
 static int list_keys(int, char *[])
 {
-	size_t i;
-
-	for (i = 0; i < 256; i++) {
+	for (size_t i = 0; i < KEYD_KEY_COUNT; i++) {
 		const char *altname = keycode_table[i].alt_name;
 		const char *shiftedname = keycode_table[i].shifted_name;
-		const char *name = keycode_table[i].name;
+		const char *name = keycode_table[i].name().data();
 
+		printf("key_%03zu: ", i);
 		if (name)
-			printf("%s\n", name);
+			printf("'%s'", name);
 		if (altname)
-			printf("%s\n", altname);
+			printf(" or '%s'", altname);
 		if (shiftedname)
-			printf("%s\n", shiftedname);
+			printf(" (shifted '%s')", shiftedname);
+		printf("\n");
+	}
+
+	for (int i = KEYD_KEY_COUNT; i < KEYD_ENTRY_COUNT; i++) {
+		const char *altname = keycode_table[i].alt_name;
+		const char *name = keycode_table[i].b_name;
+
+		if (name) {
+			printf("special: '%s'", name);
+			if (altname)
+				printf(" or '%s'", altname);
+			printf(" (key_%d)\n", i);
+		}
 	}
 
 	return 0;

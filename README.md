@@ -6,6 +6,23 @@ result often being tethered to a specified environment (X11). keyd attempts to
 solve this problem by providing a flexible system wide daemon which remaps keys
 using kernel level input primitives (evdev, uinput).
 
+keyd++ is a C++ fork of keyd and has specific features at the moment:
+
+- Rebind **any** key by its number like `key_333`. Was not possible in keyd.
+- **Macro** can now do `type(Hello world)` without worrying about spaces.
+- Bound **Macro** can now do `cmd(gnome-terminal)` and it should **just work**.
+- Wildcard for mice `m:` that excludes problematic abs ptr devices(`a:`).
+- Layer indicator with keyboard led of choice (keyd has been somewhat broken).
+- More flexible text parsing (in progress, eg. '[a+b]' now equals '[b+a]').
+- Memory optimizations (on small config only 10% of what keyd has had).
+- Performance optimizations, eg. events from ungrabbed device are ignored.
+- Some security improvement: privileged commands only run from /etc/keyd/ conf.
+- Bindings coming from ex. `keyd-application-mapper` inherit user credentials.
+- `keyd reload` from user loads user binds from `~/.config/keyd/bindings.conf`.
+- New commands for config control: push, pop, pop_all. Can unload user binds.
+- Convenience and safety coming from C++20. Sorry for longer compilation.
+- Virtually unlimited sizes/counts (keyd has had many hardcoded limitations).
+
 # Goals
 
   - Speed       (event loop that takes <<1ms for input event)
@@ -29,23 +46,6 @@ Some of the more interesting ones include:
 - System wide config (works in a VT).
 - First class support for modifier overloading.
 - Unicode support.
-
-keyd++ has specific features at the moment:
-
-- Virtually unlimited sizes/counts (keyd has had many hardcoded limitations).
-- Layer indicator with keyboard led of choice (keyd is somewhat broken).
-- **Macro** can now do `type(Hello world)` without worrying about spaces.
-- **Macro** can now execute `cmd(gnome-terminal)` and it should **just work**.
-- Allow using `ctrl` as an alias for `control` (my personal whim).
-- Wildcard for mice `m:` that excludes problematic abs ptr devices(`a:`).
-- More flexible text parsing (in progress, eg. 'a+b' now equals 'b+a').
-- Memory optimizations (sometimes only 1/5 of what keyd has had).
-- Performance optimizations, eg. events from ungrabbed device are ignored.
-- Some security improvement: privileged commands shall be in /etc/keyd/ conf.
-- Bindings coming from ex. `keyd-application-mapper` inherit uid+gid+environ.
-- `keyd reload` from user loads user binds from `~/.config/keyd/bindings.conf`.
-- New commands for config control: push, pop, pop_all. Can unload user binds.
-- Convenience and safety coming from C++20. Sorry for longer compilation.
 
 ### keyd is for people who:
 
@@ -101,7 +101,8 @@ CXX=clang++-18 make && sudo make install && sudo systemctl daemon-reload && sudo
 ```
 [ids]
 
-*
+# Capture all keyboards
+k:*
 
 [main]
 
@@ -163,6 +164,10 @@ E.G
 
 	alt.[ = C-S-tab
 	alt.] = macro(C-tab)
+
+	[org-gnome-nautilus]
+	# This Meta+F key should open selected file in Nautilus with Firefox.
+	meta.f = macro(C-c 50ms cmd(xsel -ocb | xargs firefox))
 
 - Run:
 
@@ -229,12 +234,3 @@ This overloads the capslock key to function as both escape (when tapped) and
 control (when held) and remaps all modifiers to 'oneshot' keys. Thus to produce
 the letter A you can now simply tap shift and then a instead of having to hold
 it. Finally it remaps insert to S-insert (paste on X11).
-
-# Example keyd-application-mapper configuration
-
-	[org-gnome-nautilus]
-	meta.f = macro(C-c 50ms cmd(xsel -ocb | xargs firefox))
-
-This command will open (hopefully) selected file in Firefox.
-Be aware that this command copies the file into the clipboard.
-This assumes GNOME with Nautilus file browser and X or Xwayland.

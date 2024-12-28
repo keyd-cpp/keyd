@@ -5,7 +5,7 @@
 static int aux_fd = -1;
 std::vector<device> device_table;
 
-static void panic_check(uint8_t code, uint8_t pressed)
+static void panic_check(uint16_t code, uint8_t pressed)
 {
 	static uint8_t enter, backspace, escape;
 	switch (code) {

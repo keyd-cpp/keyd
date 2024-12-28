@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <sys/resource.h>
 #include "../src/keyd.h"
 #include <memory>
 
@@ -17,10 +18,8 @@ static uint64_t get_time_ns()
 	return (uint64_t)(ts.tv_sec*1E9)+(uint64_t)ts.tv_nsec;
 }
 
-static uint8_t lookup_code(const char *name)
+static uint16_t lookup_code(const char *name)
 {
-	size_t i;
-
 	if (!strcmp(name, "control") || !strcmp(name, "ctrl"))
 		return KEYD_LEFTCTRL;
 	if (!strcmp(name, "shift"))
@@ -30,13 +29,13 @@ static uint8_t lookup_code(const char *name)
 	if (!strcmp(name, "alt"))
 		return KEYD_LEFTALT;
 
-	for (i = 0; i < 256; i++)
-		if (keycode_table[i].name && !strcmp(keycode_table[i].name, name))
+	for (size_t i = 0; i <= KEY_MAX; i++)
+		if (keycode_table[i].name() == name)
 			return i;
 	return 0;
 }
 
-static void send_key(uint8_t code, uint8_t pressed)
+static void send_key(uint16_t code, uint8_t pressed)
 {
 	output[noutput].code = code;
 	output[noutput].pressed = pressed;
@@ -106,7 +105,7 @@ static int print_diff(struct key_event *expected, size_t nexp,
 		np = 0;
 		if (i < nexp)
 			np = printf("%s %s",
-				    keycode_table[expected[i].code].name,
+				    keycode_table[expected[i].code].name().data(),
 				    expected[i].pressed ? "down" : "up");
 
 		while (np++ < 30)
@@ -117,7 +116,7 @@ static int print_diff(struct key_event *expected, size_t nexp,
 
 		if (i < nout)
 			printf("%s %s",
-			       keycode_table[output[i].code].name,
+			       keycode_table[output[i].code].name().data(),
 			       output[i].pressed ? "down" : "up");
 
 		if (!match)
@@ -171,7 +170,7 @@ static int parse_events(char *s, struct key_event in[MAX_EVENTS], size_t *nin,
 		if (len >= 2 && line[len - 1] == 's' && line[len - 2] == 'm') {
 			time += atoi(line);
 		} else {
-			uint8_t code;
+			uint16_t code;
 			char *k = strtok(line, " ");
 			char *v = strtok(NULL, " \n");
 
@@ -240,6 +239,9 @@ static void on_layer_change(const struct keyboard *kbd, struct layer *layer, uin
 
 int main(int argc, char *argv[])
 {
+	rlimit lim{rlim_t(-1), rlim_t(-1)};
+	setrlimit(RLIMIT_CORE, &lim);
+
 	size_t i;
 	struct config config;
 	uint64_t total_time = 0;

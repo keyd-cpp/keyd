@@ -26,7 +26,7 @@ static std::shared_ptr<struct vkbd> vkbd;
 static std::unique_ptr<config_ent> configs;
 extern std::vector<device> device_table;
 
-static uint8_t keystate[256];
+static std::array<uint8_t, KEY_CNT> keystate{};
 
 struct listener
 {
@@ -86,16 +86,16 @@ static void clear_vkbd()
 {
 	size_t i;
 
-	for (i = 0; i < 256; i++)
+	for (i = 0; i <= KEY_MAX; i++)
 		if (keystate[i]) {
 			vkbd_send_key(vkbd.get(), i, 0);
 			keystate[i] = 0;
 		}
 }
 
-static void send_key(uint8_t code, uint8_t state)
+static void send_key(uint16_t code, uint8_t state)
 {
-	keystate[code] = state;
+	keystate.at(code) = state;
 	vkbd_send_key(vkbd.get(), code, state);
 }
 
@@ -379,7 +379,8 @@ static int input(char *buf, [[maybe_unused]] size_t sz, uint32_t timeout)
 		char s[2];
 
 		if (csz == 1) {
-			uint8_t code, mods;
+			uint16_t code;
+			uint8_t mods;
 			s[0] = (char)codepoint;
 			s[1] = 0;
 

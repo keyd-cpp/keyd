@@ -22,7 +22,7 @@
 #define ID_KEYBOARD	4
 #define ID_ABS_PTR	8
 
-enum class op : signed char {
+enum class op : uint16_t {
 	OP_NULL = 0,
 	OP_KEYSEQUENCE = 1,
 
@@ -50,12 +50,16 @@ enum class op : signed char {
 /* Experimental */
 	OP_SCROLL_TOGGLE,
 	OP_SCROLL,
+
+	OP_MAX,
 };
 
 using enum op;
 
+static_assert(static_cast<uint16_t>(OP_MAX) <= 64);
+
 union descriptor_arg {
-	uint8_t code;
+	uint16_t code;
 	uint8_t mods;
 	int16_t idx;
 	uint16_t sz;
@@ -66,8 +70,8 @@ union descriptor_arg {
 /* Describes the intended purpose of a key (corresponds to an 'action' in user parlance). */
 
 struct descriptor {
-	uint8_t id;
-	enum op op;
+	uint16_t id : 10;
+	enum op op : 6;
 	union descriptor_arg args[MAX_DESCRIPTOR_ARGS];
 };
 
@@ -80,12 +84,12 @@ struct descriptor_map {
 	std::vector<descriptor> mapv; // Should be empty by default
 
 	void sort();
-	void set(uint8_t id, const descriptor& copy, uint8_t hint = 48);
-	const descriptor& operator[](uint8_t id) const;
+	void set(uint16_t id, const descriptor& copy, uint32_t hint = 48);
+	const descriptor& operator[](uint16_t id) const;
 };
 
 struct chord {
-	std::array<uint8_t, 8> keys;
+	std::array<uint16_t, 8> keys;
 	struct descriptor d;
 };
 

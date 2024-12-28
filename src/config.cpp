@@ -98,7 +98,7 @@ void descriptor_map::sort()
 	size = mapv.size();
 }
 
-void descriptor_map::set(uint8_t id, const descriptor& copy, uint8_t hint)
+void descriptor_map::set(uint16_t id, const descriptor& copy, uint32_t hint)
 {
 	auto& found = const_cast<descriptor&>((*this)[id]);
 	if (found.id == id) {
@@ -129,7 +129,7 @@ void descriptor_map::set(uint8_t id, const descriptor& copy, uint8_t hint)
 	return;
 }
 
-const descriptor& descriptor_map::operator[](uint8_t id) const
+const descriptor& descriptor_map::operator[](uint16_t id) const
 {
 	if (size <= maps.size()) {
 		// Static array: always unsorted
@@ -220,16 +220,11 @@ static std::string read_file(const char *path, size_t recursion_depth = 0)
 
 
 /* Return up to two keycodes associated with the given name. */
-static uint8_t lookup_keycode(const char *name)
+static uint16_t lookup_keycode(const char *name)
 {
-	size_t i;
-
-	for (i = 0; i < 256; i++) {
+	for (size_t i = 0; i < KEYD_KEY_COUNT; i++) {
 		const struct keycode_table_ent *ent = &keycode_table[i];
-
-		if (ent->name &&
-		    (!strcmp(ent->name, name) ||
-		     (ent->alt_name && !strcmp(ent->alt_name, name)))) {
+		if ((ent->name() == name) || (ent->alt_name && !strcmp(ent->alt_name, name))) {
 			return i;
 		}
 	}
@@ -301,7 +296,7 @@ static int set_layer_entry(const struct config *config,
 			while (range.first != range.second)
 				layer->keymap.set(range.first++->second.args[0].code, *d);
 		} else {
-			uint8_t code;
+			uint16_t code;
 
 			if (!(code = lookup_keycode(key))) {
 				err("%s is not a valid key or alias", key);
@@ -522,7 +517,8 @@ exit:
 
 static int parse_macro_expression(std::string_view s, macro& macro, struct config* config)
 {
-	uint8_t code, mods;
+	uint8_t mods;
+	uint16_t code;
 
 	if (s.starts_with("macro(") && s.ends_with(')')) {
 		s.remove_suffix(1);
@@ -556,7 +552,8 @@ static int parse_descriptor(char *s,
 	char *fn = NULL;
 	char *args[5];
 	size_t nargs = 0;
-	uint8_t code, mods;
+	uint16_t code;
+	uint8_t mods;
 	int ret;
 	::macro macro;
 	std::string cmd;
@@ -737,7 +734,7 @@ static int parse_descriptor(char *s,
 		}
 	}
 
-	err("invalid key or action");
+	err("invalid key or action: %s", s);
 	return -1;
 }
 
@@ -830,13 +827,13 @@ static void parse_alias_section(struct config *config, struct ini_section *secti
 	size_t i;
 
 	for (i = 0; i < section->entries.size(); i++) {
-		uint8_t code;
+		uint16_t code;
 		struct ini_entry *ent = &section->entries[i];
 		const char *name = ent->val;
 
 		if ((code = lookup_keycode(ent->key))) {
 			if (name && name[0]) {
-				uint8_t alias_code;
+				uint16_t alias_code;
 
 				if ((alias_code = lookup_keycode(name))) {
 					struct descriptor d = config->layers[0].keymap[code];
