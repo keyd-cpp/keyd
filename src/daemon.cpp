@@ -563,7 +563,7 @@ static void handle_client(::listener con)
 
 static int event_handler(struct event *ev)
 {
-	static int last_time = 0;
+	static int64_t last_time = 0;
 	static int timeout = 0;
 	struct key_event kev = {};
 	auto vkbd = ::vkbd.get();

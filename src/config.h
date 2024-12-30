@@ -161,15 +161,15 @@ struct config {
 
 	std::vector<dev_id> ids;
 
-	long macro_timeout;
-	long macro_sequence_timeout;
-	long macro_repeat_timeout;
-	long oneshot_timeout;
+	int64_t macro_timeout;
+	int64_t macro_sequence_timeout;
+	int64_t macro_repeat_timeout;
+	int64_t oneshot_timeout;
 
-	long overload_tap_timeout;
+	int64_t overload_tap_timeout;
 
-	long chord_interkey_timeout;
-	long chord_hold_timeout;
+	int64_t chord_interkey_timeout;
+	int64_t chord_hold_timeout;
 
 	uint8_t wildcard = 0;
 	uint8_t layer_indicator = 255;

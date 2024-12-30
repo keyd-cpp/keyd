@@ -32,7 +32,7 @@ static void cleanup()
 
 int event_handler(struct event *ev)
 {
-	static long last_time = 0;
+	static int64_t last_time = 0;
 
 	switch (ev->type) {
 	const char *name;

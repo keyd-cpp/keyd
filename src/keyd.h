@@ -64,10 +64,10 @@ using enum event_type;
 
 struct event {
 	enum event_type type;
+	int fd;
+	int64_t timestamp;
 	struct device *dev;
 	struct device_event *devev;
-	int timestamp;
-	int fd;
 };
 
 enum class ipc_msg_type_e : signed char {

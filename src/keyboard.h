@@ -83,16 +83,16 @@ struct keyboard {
 	int active_macro_layer;
 	int overload_last_layer_code;
 
-	long macro_timeout;
-	long oneshot_timeout;
+	int64_t macro_timeout;
+	int64_t oneshot_timeout;
 
-	long macro_repeat_interval;
+	int64_t macro_repeat_interval;
 
-	long overload_start_time;
+	int64_t overload_start_time;
 
-	long last_simple_key_time;
+	int64_t last_simple_key_time;
 
-	long timeouts[64];
+	int64_t timeouts[64];
 	size_t nr_timeouts;
 
 	struct active_chord active_chords[KEYD_CHORD_MAX-KEYD_CHORD_1+1];
@@ -105,16 +105,16 @@ struct keyboard {
 		int match_layer;
 
 		uint16_t start_code;
-		long last_code_time;
+		int64_t last_code_time;
 
 		enum chord_state_e state;
 	} chord;
 
 	struct {
 		uint16_t code;
-		uint8_t dl;
-		long expire;
-		long tap_expiry;
+		int16_t dl;
+		int64_t expire;
+		int64_t tap_expiry;
 
 		enum pending_behaviour_e behaviour;
 
@@ -123,10 +123,10 @@ struct keyboard {
 
 		struct descriptor action1;
 		struct descriptor action2;
-	} pending_key;
+	} pending_key{};
 
 	struct layer_state_t {
-		long activation_time;
+		int64_t activation_time;
 
 		uint8_t active;
 		uint8_t toggled;
@@ -147,7 +147,7 @@ struct keyboard {
 
 std::unique_ptr<keyboard> new_keyboard(std::unique_ptr<keyboard>);
 
-long kbd_process_events(struct keyboard *kbd, const struct key_event *events, size_t n);
+int64_t kbd_process_events(struct keyboard *kbd, const struct key_event *events, size_t n);
 bool kbd_eval(struct keyboard *kbd, std::string_view);
 void kbd_reset(struct keyboard *kbd);
 

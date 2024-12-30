@@ -8,16 +8,16 @@
 #include <memory>
 #include <algorithm>
 
-static long process_event(struct keyboard *kbd, uint16_t code, int pressed, long time);
+static int64_t process_event(struct keyboard *kbd, uint16_t code, int pressed, int64_t time);
 
 /*
  * Here be tiny dragons.
  */
 
-static long get_time()
+static int64_t get_time()
 {
 	/* Close enough :/. Using a syscall is unnecessary. */
-	static long time = 1;
+	static int64_t time = 1;
 	return time++;
 }
 
@@ -184,7 +184,7 @@ static void lookup_descriptor(struct keyboard *kbd, uint16_t code,
 
 	d->op = OP_NULL;
 
-	long maxts = 0;
+	int64_t maxts = 0;
 
 	if (code >= KEYD_CHORD_1 && code <= KEYD_CHORD_MAX) {
 		size_t idx = code - KEYD_CHORD_1;
@@ -309,7 +309,7 @@ static int chord_event_match(struct chord *chord, struct key_event *events, size
 		return n == (chord->keys.size() - std::count(chord->keys.begin(), chord->keys.end(), 0)) ? 2 : 1;
 }
 
-static void enqueue_chord_event(struct keyboard *kbd, uint16_t code, uint8_t pressed, long time)
+static void enqueue_chord_event(struct keyboard *kbd, uint16_t code, uint8_t pressed, int64_t time)
 {
 	if (!code)
 		return;
@@ -334,7 +334,7 @@ static int check_chord_match(struct keyboard *kbd, const struct chord **chord, i
 	size_t idx;
 	int full_match = 0;
 	int partial_match = 0;
-	long maxts = -1;
+	int64_t maxts = -1;
 
 	for (idx = 0; idx < kbd->config.layers.size(); idx++) {
 		struct layer *layer = &kbd->config.layers[idx];
@@ -461,16 +461,16 @@ static void setlayout(struct keyboard *kbd, int idx)
 }
 
 
-static void schedule_timeout(struct keyboard *kbd, long timeout)
+static void schedule_timeout(struct keyboard *kbd, int64_t timeout)
 {
 	assert(kbd->nr_timeouts < ARRAY_SIZE(kbd->timeouts));
 	kbd->timeouts[kbd->nr_timeouts++] = timeout;
 }
 
-static long calculate_main_loop_timeout(struct keyboard *kbd, long time)
+static int64_t calculate_main_loop_timeout(struct keyboard *kbd, int64_t time)
 {
 	size_t i;
-	long timeout = 0;
+	int64_t timeout = 0;
 	size_t n = 0;
 
 	for (i = 0; i < kbd->nr_timeouts; i++)
@@ -485,12 +485,10 @@ static long calculate_main_loop_timeout(struct keyboard *kbd, long time)
 	return timeout ? timeout - time : 0;
 }
 
-static long process_descriptor(struct keyboard *kbd, uint16_t code,
-			       const struct descriptor *d, int dl,
-			       int pressed, long time)
+static int64_t process_descriptor(struct keyboard *kbd, uint16_t code, const struct descriptor *d, int dl, int pressed, int64_t time)
 {
 	int i;
-	int timeout = 0;
+	int64_t timeout = 0;
 
 	if (pressed) {
 		switch (d->op) {
@@ -551,7 +549,7 @@ static long process_descriptor(struct keyboard *kbd, uint16_t code,
 	case OP_OVERLOAD_IDLE_TIMEOUT:
 		if (pressed) {
 			struct descriptor *action;
-			long timeout = d->args[2].timeout;
+			int64_t timeout = d->args[2].timeout;
 
 			if (((time - kbd->last_simple_key_time) >= timeout))
 				action = &kbd->config.descriptors[d->args[1].idx];
@@ -583,7 +581,7 @@ static long process_descriptor(struct keyboard *kbd, uint16_t code,
 			kbd->pending_key.action1 = *action;
 			kbd->pending_key.action2.op = OP_LAYER;
 			kbd->pending_key.action2.args[0].idx = layer;
-			kbd->pending_key.expire = time+d->args[2].timeout;
+			kbd->pending_key.expire = time + d->args[2].timeout;
 
 			schedule_timeout(kbd, kbd->pending_key.expire);
 		}
@@ -885,11 +883,11 @@ static int abort_chord(struct keyboard *kbd)
 	return resolve_chord(kbd);
 }
 
-static int handle_chord(struct keyboard *kbd, uint16_t code, int pressed, long time)
+static int handle_chord(struct keyboard *kbd, uint16_t code, int pressed, int64_t time)
 {
 	size_t i;
-	const long interkey_timeout = kbd->config.chord_interkey_timeout;
-	const long hold_timeout = kbd->config.chord_hold_timeout;
+	const int64_t interkey_timeout = kbd->config.chord_interkey_timeout;
+	const int64_t hold_timeout = kbd->config.chord_hold_timeout;
 
 	if (code && !pressed) {
 		for (i = 0; i < ARRAY_SIZE(kbd->active_chords); i++) {
@@ -956,7 +954,7 @@ static int handle_chord(struct keyboard *kbd, uint16_t code, int pressed, long t
 		if (!code) {
 			if ((time - kbd->chord.last_code_time) >= interkey_timeout) {
 				if (kbd->chord.match) {
-					long timeleft = hold_timeout - interkey_timeout;
+					int64_t timeleft = hold_timeout - interkey_timeout;
 					if (timeleft > 0) {
 						schedule_timeout(kbd, time + timeleft);
 						kbd->chord.state = CHORD_PENDING_HOLD_TIMEOUT;
@@ -1022,7 +1020,7 @@ static int handle_chord(struct keyboard *kbd, uint16_t code, int pressed, long t
 	return 0;
 }
 
-int handle_pending_key(struct keyboard *kbd, uint16_t code, int pressed, long time)
+int handle_pending_key(struct keyboard *kbd, uint16_t code, int pressed, int64_t time)
 {
 	if (!kbd->pending_key.code)
 		return 0;
@@ -1118,7 +1116,7 @@ int handle_pending_key(struct keyboard *kbd, uint16_t code, int pressed, long ti
  * of process_event must take place. A return value of 0 permits the
  * main loop to call at liberty.
  */
-static long process_event(struct keyboard *kbd, uint16_t code, int pressed, long time)
+static int64_t process_event(struct keyboard *kbd, uint16_t code, int pressed, int64_t time)
 {
 	int dl = -1;
 	struct descriptor d;
@@ -1189,11 +1187,11 @@ exit:
 }
 
 
-long kbd_process_events(struct keyboard *kbd, const struct key_event *events, size_t n)
+int64_t kbd_process_events(struct keyboard *kbd, const struct key_event *events, size_t n)
 {
 	size_t i = 0;
-	int timeout = 0;
-	int timeout_ts = 0;
+	int64_t timeout = 0;
+	int64_t timeout_ts = 0;
 
 	while (i != n) {
 		const struct key_event *ev = &events[i];

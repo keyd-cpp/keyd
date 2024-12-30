@@ -24,11 +24,11 @@ static void panic_check(uint16_t code, uint8_t pressed)
 		die("panic sequence detected");
 }
 
-static long get_time_ms()
+static int64_t get_time_ms()
 {
 	struct timespec ts;
 	clock_gettime(CLOCK_MONOTONIC, &ts);
-	return ts.tv_sec * 1E3 + ts.tv_nsec / 1E6;
+	return int64_t(ts.tv_sec) * 1000 + ts.tv_nsec / 1000'000;
 }
 
 int evloop(int (*event_handler) (struct event *ev))
@@ -68,8 +68,8 @@ int evloop(int (*event_handler) (struct event *ev))
 	while (1) {
 		int removed = 0;
 
-		int start_time;
-		int elapsed;
+		int64_t start_time;
+		int64_t elapsed;
 
 		for (i = 0; i < device_table.size(); i++) {
 			if (i == std::size(pfds) - (pfdsd - pfds)) {
