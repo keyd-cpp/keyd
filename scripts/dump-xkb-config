@@ -48,6 +48,7 @@ while (<FH>) {
 	59 => ",",
 	60 => ".",
 	61 => "/",
+	49 => "`",
 	10 => "1",
 	11 => "2",
 	12 => "3",
@@ -92,21 +93,19 @@ for (`xmodmap -pke`) {
 `setxkbmap -query` =~ /layout:\s*(\S*)/;
 $shift_layer = "$1_shift";
 
-print "[$1:layout]\n\n";
+print "[$1]\n\n";
 print "$_ = $keymap{$_}\n" foreach (sort keys %keymap);
-print "shift = layer(${1}_shift)\n";
-print "altgr = layer(${1}_altgr)\n" if (%altgr_keymap);
 print "\n";
 
-print "[${1}_shift:S]\n";
+print "[S-$1]\n";
 print "$_ = $shifted_keymap{$_}\n" foreach (sort keys %shifted_keymap);
 
 if (%altgr_keymap) {
 	print "\n";
-	print "[${1}_altgr:G]\n";
+	print "[G-$1]\n";
 	print "$_ = $altgr_keymap{$_}\n" foreach (sort keys %altgr_keymap);
 	print "\n";
 
-	print "[${1}_altgr+${1}_shift]\n";
+	print "[G-S-$1]\n";
 	print "$_ = $shifted_altgr_keymap{$_}\n" foreach (sort keys %shifted_altgr_keymap);
 }

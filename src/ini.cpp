@@ -29,6 +29,9 @@ void parse_kvp(char *s, char **key, char **value)
 	/* Allow the first character to be = as a special case. */
 	if (*c == '=')
 		c++;
+	// TODO: parse and allow modstring
+	if (*c == '*' && c[1] == '*' && c[2] == '=')
+		c += 3;
 
 	*key = s;
 	*value = NULL;

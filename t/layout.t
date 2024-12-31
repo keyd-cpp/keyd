@@ -14,13 +14,13 @@ x up
 o down
 o up
 alt down
-shift down
 meta down
+shift down
 control down
 x down
 x up
-shift up
 meta up
+shift up
 control up
 alt up
 x down

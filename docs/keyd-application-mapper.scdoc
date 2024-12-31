@@ -43,24 +43,24 @@ E.G:
 ```
 	[kitty]
 
-	alt.] = C-tab
-	alt.[ = C-S-tab
-	alt.t = C-S-t
+	A-] = C-tab
+	A-[ = C-S-tab
+	A-t = C-S-t
 
 	[st-*]
 
-	alt.1  = macro(Inside space st)
+	A-1  = macro(type(Inside st))
 
 	[chromium]
 
-	control.1 = macro(Inside space chrome!)
-	alt.] = C-tab
-	alt.[ = C-S-tab
-	alt.t = C-t
+	C-1 = macro(type(Inside chrome!))
+	A-] = C-tab
+	A-[ = C-S-tab
+	A-t = C-t
 ```
 
 Will remap _A-1_ to the the string 'Inside st' when a window with a class
-that begins with 'st-' (e.g st-256color) is active. 
+that begins with 'st-' (e.g st-256color) is active.
 
 Window class and title names can be obtained by inspecting the log output while the
 daemon is running (e.g _tail\ -f\ ~/.config/keyd/app.log_). A reload may be triggered
@@ -72,12 +72,12 @@ At the moment X, Sway and Gnome are supported.
 
 Installation is a simple matter of running the command _keyd-application-mapper -d_
 somewhere in your display server initialization logic (e.g _~/.xinitrc_ or
-_~/.xsession_). If you are running Gnome, 
+_~/.xsession_). If you are running Gnome,
 running _keyd-application-mapper_ for the first time will install an extension
 which manages the script lifecycle.
 
 In order for this to work, keyd must be running and the user must have access
-to */var/run/keyd.socket* (i.e be a member of the *keyd* group). 
+to */var/run/keyd.socket* (i.e be a member of the *keyd* group).
 
 # ENVIRONMENT VARIABLES
 
@@ -97,4 +97,3 @@ opportunity for abuse and should be treated with due deference.
 Specifically, access to */var/run/keyd.socket* should only be granted to
 trusted users and the group _keyd_ should be regarded with the same reverence
 as _wheel_.
-

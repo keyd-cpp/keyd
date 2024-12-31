@@ -2,7 +2,7 @@ keyd(1)
 
 # NAME
 
-*keyd* - A key remapping daemon.
+*keyd++* - A key remapping daemon (extended version).
 
 # SYNOPSIS
 
@@ -16,11 +16,11 @@ keyd(1)
 *listen*
 	Print layer state changes of the running keyd daemon to stdout. Useful for scripting.
 
-*bind reset|push|pop|pop_all<binding> [<binding>...]*
+*bind reset|push|pop|pop_all|<binding> [<binding>...]*
 	Apply the supplied bindings. See _Bindings_ for details.
 
 *reload*
-	Reload config files. Optionally loads bindings from $HOME/.config/keyd/bindings.conf
+	Reload config files. When runs from user with keyd group, additionally applies _~/.config/keyd/bindings.conf_
 
 *list-keys*
 	List valid key names.
@@ -69,7 +69,7 @@ Config files are stored in _/etc/keyd/_ and loaded upon initialization.
 The reload command can be used to update the working set of config
 files (e.g sudo keyd reload).
 
-A valid config file has the extension _.conf_ and *must* begin with an _[ids]_
+A valid config file has the extension _.conf_ and *must* contain _[ids]_
 section that has one of the following forms:
 
 ```
@@ -117,7 +117,7 @@ the monitor command (see _COMMANDS_). Note that a device id may only be
 listed in a single config file.
 
 Each subsequent section of the file corresponds to a _layer_ (with the exception
-of _[global]_ (see _GLOBALS_).
+of _[global]_ (see _GLOBALS_) and _[aliases]_.
 
 Config errors will appear in the log output and can be accessed in the usual
 way using your system's service manager (e.g sudo journalctl -eu keyd).
@@ -131,10 +131,9 @@ same state. This is useful for linking separate input devices together
 (e.g foot pedals).
 
 Note 2: *Mouse support is currently experimental*, and is mostly confined to
-traditional mice (e.g touchpads). Adding some mice to
-your ids section may break your pointer. *It may also be necessary
-to explicitly blacklist mice which are misidentified as keyboards
-(e.g if you find your moused misbehaving).*
+traditional mice. Adding some mice to your ids section may break your pointer.
+*It may also be necessary to explicitly blacklist mice which are misidentified
+as keyboards (e.g if you find your moused misbehaving).*
 
 ## Layers
 
@@ -162,51 +161,47 @@ and creates a toggle for it in the _main_ layer:
 When capslock is held, the _nav_ layer occludes the _main_ layer
 causing _hjkl_ to function as the corresponding arrow keys.
 
-Unlike most other remapping tools, keyd provides first class support for
-modifiers. A layer name may optionally end with a ':' followed by a
-set of modifiers to emulate in the absence of an explicit mapping.
-
-These layers play nicely with other modifiers and preserve existing stacking
-semantics.
-
-For example:
+Example with handling modifiers:
 
 ```
 	[main]
 
-	capslock = layer(capslock)
+	capslock = layer(capslock+control)
 
-	[capslock:C]
+	[capslock]
 
-	j = down
+	C-j = down
 ```
 
 will cause _capslock_ to behave as _control_, except in the case of _capslock+j_, which will
 emit _down_. This makes it trivial to define custom modifiers which don't interfere with
 one another.
 
-Note that bindings are not affected by the modifiers of the layer in which they
-are defined. Thus *capslock+j* will produce an unmodified *down* keypress, while
-*shift+capslock+j* will produce *shift+down* as expected.
-
-
-Formally, each layer heading has the following form:
+Formally, each layer section heading has the following form:
 
 ```
-	"[" <layer name>[:<modifier set>] "]"
+	"[" [<left-hand modifiers>]<layer name>[<added right-hand modifiers>] "]"
 ```
 
-Where _<modifier_set>_ has the form:
+Where left-hand modifiers has the form:
 
-	_<modifier1>[-<modifier2>]..._
+	_[\*\*][<modifier1>-][<wildcard2>\*]..._
 
-and each modifier is one of:
+and added right-hand modifiers has the form:
+
+	_[\*\*][-<modifier1>][\*<wildcard2>]..._
+
+and each modifier or wildcard is one of:
 
 	*C* - Control++
 *M* - Meta/Super++
 *A* - Alt++
 *S* - Shift++
-*G* - AltGr
+*G* - AltGr++
+*H* - Hyper (unset by default)++
+*L* - Layer 5 (unset by default)++
+*N* - Another unset modifier (named mod7 internally)++
+*\*\** - Full wildcard implies *any* combinations of modifiers
 
 Finally, each layer heading is followed by a set of bindings which take the form:
 
@@ -214,64 +209,42 @@ Finally, each layer heading is followed by a set of bindings which take the form
 
 for a description of <action> and <macro> see _ACTIONS_ and _MACROS_.
 
-By default, each key is bound to itself within the main layer. The exception to this
-are the modifier keys, which are instead bound to eponymously named layers with the
-corresponding modifiers.
+Apart from _[main]_, there are 8 built-in layers corresponding to each modifier.
 
-For example, _meta_ is actually bound to _layer(meta)_, where _meta_ is
-internally defined as _meta:M_.
+	*[ctrl]* or *[control]*++
+*[alt]*++
+*[shift]*++
+*[altgr]*++
+*[meta]* or *[super]*++
+*[hyper]*++
+*[layer5]*++
+*[mod7]* or *[nlock]*
 
-The full set of modifier bindings are as follows:
-
-```
-	control = layer(control)
-	meta = layer(meta)
-	shift = layer(shift)
-	leftalt = layer(alt)
-	rightalt = layer(altgr)
-```
-
-A consequence of this is that overriding modifier keys is a simple matter of
-adding the desired bindings to an appropriate pre-defined layer.
-
-Thus
-
-```
-	[ids]
-	k:*
-
-	[control]
-	j = down
-```
-
-is a completely valid config, which does what the benighted user might expect. Internally,
-the full config actually looks something like this:
+Example:
 
 ```
 	[ids]
 	k:*
 
 	[main]
-	leftcontrol = layer(control)
-	rightcontrol = layer(control)
-
-	[control:C]
-	j = down
+	C-j = down
 ```
 
-If multiple bindings for the same key are present, the most recent one takes precedence.
+is a completely valid config, which does what the benighted user might expect.
 
-A layer heading may also appear multiple times, in which case the layer will
-contain the sum of all bindings. Note that the layer type may not be reassigned.
+If multiple bindings for the same key are present, the most recent one takes precedence.
+If bindings contain wildcards on the left side, they have lower priority than exact ones.
+
+A layer heading may also appear multiple times, each time section-specific mods apply.
 
 That is:
 
 ```
-[mylayer:A]
+[mylayer-A]
 a = b
 c = d
 
-[mylayer:C]
+[mylayer-C]
 a = x
 b = c
 ```
@@ -279,10 +252,10 @@ b = c
 is equivalent to:
 
 ```
-[mylayer:A]
-a = x
-b = c
-c = d
+[mylayer]
+a = C-x
+b = C-c
+c = A-d
 ```
 
 ## Composite Layers
@@ -290,8 +263,7 @@ c = d
 A special kind of layer called a *composite layer* can be defined by creating a
 layer with a name consisting of existing layers delimited by _+_. The resultant
 layer will be activated and given precedence when all of its constituents are
-activated. Composite layers are not allowed to have modifiers attached and
-cannot be explicitly assigned.
+activated.
 
 E.g.
 
@@ -300,82 +272,31 @@ E.g.
 	h = left
 ```
 
-will cause the sequence _control+alt+h_ to produce _left_ (ignoring the control
-and alt modifiers attached to the active control and alt layers), while pressing
-_control+alt+f1_ preserves those modifiers, emitting exactly what was pressed,
-as there is no explicit binding for _f1_ on the composite layer.
+will cause the sequence _control+alt+h_ to produce _left_. But instead,
+it would be easier to add _C-A-h = left_ to the _[main]_ with similar result.
 
 
 ```
 	[main]
 	capslock = layer(capslock)
 
-	[capslock:C]
+	[capslock+ctrl]
+	h = right
 
 	[capslock+shift]
-	h = left
+	C-h = left
 ```
 
 Will cause the sequence _capslock+shift+h_ to produce _left_, while preserving the expected functionality of _capslock_ and _shift_ in isolation.
-
-*Note:* composite layers *must* always be defined _after_ the layers of which they
-are comprised.
-
-That is:
-
-```
-[layer1]
-[layer2]
-[layer1+layer2]
-```
-
-and not
-
-```
-[layer1+layer2]
-[layer1]
-[layer2]
-```
-
-## Layouts
-
-A layout is a special kind of layer intended for modifying alpha keys. Unlike
-layers, layouts cannot have any associated modifiers, and only one layout may
-be active at a given time. The default layout is called 'main', and can be
-changed using the _setlayout()_ action.
-
-For convenience, keyd ships with a number of common letter layouts in
-/usr/share/keyd/layouts. Before including these, it is instructive to inspect them.
-Non-english layouts include a dedicated shift layer (making order of inclusion
-important) and *require the use of keyd's compose definitions* (see *Unicode
-Support*)
-
-E.g.
-
-```
-# Include the shipped colemak layout.
-include layouts/colemak
-
-[global]
-default_layout = mylayout
-
-[mylayout:layout]
-a = b
-b = c
-#etc...
-
-[control]
-1 = setlayout(customlayout)
-2 = setlayout(colemak)
-```
-
 
 ## Chording
 
 _Chords_ are groups of keys which are treated as a unit when simultaneously
 depressed. A chord can be defined by using a group of + delimited key names as
 a left hand value. The corresponding action will be activated if all keys are
-struck within the chording interval (_chord_timeout_).
+struck within the chording interval (_chord_timeout_). Using chords is **not**
+recommended as they introduce typing latency for chord components. There is
+also possibility of unexpected results and bugs.
 
 E.g
 
@@ -405,47 +326,41 @@ E.g.
 
 **Additionally you will need to be using the default US layout on your
 display server.** Users of non-english layouts are advised to set their layout
-within keyd (see **Layouts**) to avoid conflicts between the display server
-layout and keyd's unicode functionality.
+within keyd as layers to avoid conflicts between the display server
+layout and keyd's unicode functionality. It's recommended to setup
+international English keyboard with AltGr dead key support.
 
-**Note:** You may have to restart your applications for this to take effect.
+**Note:** You may have to restart your computer for this to take effect.
 
-**Note 2:** The generated compose sequences are affected by modifiers in the
-normal way. If you want shift to produce a different symbol, you will need to
-define a custom shift layer (see the included layout files for an example).
-
-**Note 3:**
-GTK4 currently has a bug which causes it to crash in the presence of large XCompose files
-(like /usr/share/keyd/keyd.compose).
+**Note 2:** Unicode cannot have attached modifiers, i.e. _C-A-æ_ is invalid.
 
 ## Aliases
 
 Each key may optionally be assigned an *alias*. This alias may be used in place
-of the key as a valid left hand value. Multiple keys may be bound to the same alias,
-but only one alias may be assigned to a key at a given time.
+of the key as a valid left hand value. Multiple keys may be bound to the same alias.
 
-For example, the keys 'leftmeta' and 'rightmeta' are bound to the alias *meta*
-by default. Thus the binding 'meta = a' is equivalent to the bindings 'leftmeta
-= a' and 'rightmeta = a'.
+There are builtin aliases, like 'meta', 'ctrl' (equals 'control'), 'altgr'.
+Thus the binding 'meta = a' by default is equivalent to the two bindings:
+'leftmeta = a' and 'rightmeta = a'.
 
 Aliases are defined in a special section called 'aliases' where each line takes
-the form:
+the two possible forms:
 
 	<key> = <name>
+	<key_id> = <mod_id>
 
-where _<key>_ must be a valid key name.
-
-Note that <name> may itself be a valid key name, in which case all references
-to the key within the config file will be replaced with the new key.
-Additionally, if the assigned alias is a valid key name, the corresponding
-keycode will be assigned to the key by default. This makes it possible to
-redefine keys before any bindings are applied and is particularly useful in
-conjunction with the include mechanism to account for variations in hardware.
+_<key>_ must be a valid left-hand key name (can contain wildcards and mofifiers),
+_<name>_ must be a name not used by keys (cannot contain modifiers),
+_<key_id>_ is a key name without modifiers or imbued shift.
+Finally, _<mod_id>_ is one of A, C, M, G, S, H, L, N modkeys.
+Modkeys affect builtin aliases mentioned before.
+If key is assigned to some mod, it's removed from all other mods.
 
 For example:
 
 ```
 /etc/keyd/common:
+	[**main**]
 	meta = oneshot(meta)
 	alt = oneshot(alt)
 
@@ -457,7 +372,6 @@ For example:
 	[ids]
 	k:*
 
-	[main]
 	include common
 
 /etc/keyd/magic_keyboard.conf:
@@ -465,12 +379,11 @@ For example:
 	004c:0267
 
 	[aliases]
-	leftalt = meta
-	rightalt = meta
-	rightmeta = alt
-	leftmeta = alt
+	leftalt = M
+	rightalt = M
+	leftmeta = A
+	rightmeta = A
 
-	[main]
 	include common
 ```
 
@@ -493,51 +406,9 @@ directories:
 	- /etc/keyd/
 	- /usr/share/keyd/
 
-E.g.
-
-```
-/etc/keyd/default.conf:
-	[ids]
-	k:*
-
-	# Add our shared custom bindings.
-	include common
-
-	# Appends bindings to the main layer
-	# defined in /etc/keyd/common (order matters)
-	[main]
-	capslock = layer(capslock)
-
-	[capslock]
-	1 = setlayout(colemak)
-	2 = setlayout(dvorak)
-
-/etc/keyd/common:
-	[main]
-
-	rightmeta = layer(nav)
-
-	[nav]
-
-	h = left
-	j = down
-	k = up
-	l = right
-
-/usr/share/keyd/layouts/dvorak:
-	a = a
-	s = o
-	...
-
-```
-
 Limitations:
 
-	- All include statements should appear after the [ids] section in the including file.
-	- Included files should not contain an ids section.
-	- Included files should not include other files (inclusion is non-recursive).
 	- Included files should not end in .conf.
-
 
 # GLOBALS
 
@@ -603,6 +474,7 @@ Where _<char>_ is a valid unicode character and _<exp>_ has the form _<token1> [
 	- A group of key codes delimited by + to be depressed as a unit.
 	- A timeout of the form _<time>ms_ (where _<time>_ < 1024).
 	- A command to execute of the form _cmd(<shell command>)_, similar to command() action.
+	- A command to type text of the form _type(<text>)_, or 't()', 'text()', 'txt()'.
 
 The following are all valid macro expressions:
 
@@ -610,9 +482,12 @@ The following are all valid macro expressions:
 	- macro(C-a)
 	- macro(leftcontrol+leftmeta) # simultaneously taps the left meta and left control keys
 	- A-M-x
+	- macro(type(hello world))
 	- macro(h e l l o space w o r ld) (identical to the above)
 	- macro(C-t 100ms g o o g l e . c o m enter)
 	- macro(cmd(brightness down))
+
+Wildcards are not allowed inside a macro, but special _\*\*macro()_ form is possible.
 
 Splitting into smaller tokens serves as an escaping mechanism: _macro(space)_
 inserts a space but _macro(s p a c e)_ writes "space". Likewise, _macro(3+5)_
@@ -656,8 +531,8 @@ A key may optionally be bound to an _action_ which accepts zero or more argument
 	can be done by other means, as it is easy to end up in states which
 	are impossible to exit.
 
-*setlayout(<layout>)*
-	Set the current layout.
+*setlayout(<layer>)*
+	Set the specified layer as a current layout.
 
 *clear()*
 	Clear any toggled or oneshot layers.
@@ -761,21 +636,17 @@ A key may optionally be bound to an _action_ which accepts zero or more argument
 
 	command(brightness down)
 
-*NOTE:* Commands are executed by the user running the keyd process (probably root),
-use this feature judiciously.
+*NOTE:* Commands defined in system-wide config are executed by the user running the keyd process
+(probably root), **but** commands added via IPC inherit the process' credentials and environmentals.
 
 *noop*
 	Do nothing.
 
 # IPC
 
-To facilitate extensibility, keyd employs a client-server model accessible
-through the use of *-e*. The keymap can thus be conceived of as a
-living entity that can be modified at run time.
+Running `keyd` daemon can be accessed by users in `keyd` group or root.
 
-In addition to allowing the user to try new bindings on the fly, this
-enables the user to fully leverage keyd's expressive power from other programs
-without incurring a performance penalty.
+Be careful with adding users to `keyd` group as they can modify mappings.
 
 For instance, the user may use this functionality to write a script which
 alters the keymap when they switch between different tmux sessions.
@@ -783,10 +654,7 @@ alters the keymap when they switch between different tmux sessions.
 The application remapping tool (*keyd-application-mapper(1)*) which ships with keyd
 is a good example of this. It is a small python script which performs event
 detection for the various display servers (e.g X/sway/gnome, etc) and feeds the
-desired mappings to the core using _-e_.
-
-*NOTE:* Users with access to the keyd socket should be considered privileged
-(i.e assumed to have access to the entire system.).
+desired mappings to the core using _bind_ command.
 
 ## Bindings
 
@@ -822,16 +690,16 @@ Make _esc+q_ toggle the dvorak letter layout.
 
 	[main]
 	esc = layer(esc)
+	[esc]
+	q = toggle(dvorak)
 
-	[dvorak]
+	[**dvorak**]
 
 	a = a
 	s = o
 	...
 
-	[esc]
 
-	q = toggle(dvorak)
 ```
 
 ## Example 2
@@ -892,12 +760,12 @@ _will thus produce A-tab instead of M-\\_.
 ```
 	[meta]
 
-	` = swap(alt_tab, A-tab)
+	` = swapm(alt_tab+alt, A-tab)
 
-	[alt_tab:A]
+	[alt_tab]
 
-	tab = A-S-tab
-	` = A-tab
+	A-tab = A-S-tab
+	A-` = A-tab
 ```
 
 ## Example 5
@@ -929,11 +797,10 @@ _will thus produce A-tab instead of M-\\_.
 ```
 	# Holding both shift keys will activate capslock.
 
-	[shift]
+	[main]
 
     # Without a delay, you may have capslock turn on as you type
-    leftshift =	timeout(leftshift, 1000, capslock)
-    rightshift = timeout(rightshift, 1000, capslock)
+    S-shift = timeout(**, 1000, capslock)
 ```
 
 ## Example 7
@@ -944,10 +811,11 @@ keys. If tapped, it will function as escape.
 
 ```
 	[main]
-	capslock = overload(capslock, esc)
+	capslock = overload(capslock+ctrl, esc)
+	**capslock = layer(capslock+ctrl)
 	esc = capslock
 
-	[capslock:C]
+	[C-capslock]
 	h = left
 	k = up
 	j = down
@@ -960,8 +828,8 @@ Disables the esc and end keys.
 
 ```
 	[main]
-	esc = noop
-	end = noop
+	**esc = noop
+	**end = noop
 ```
 
 # ENVIRONMENT VARIABLES

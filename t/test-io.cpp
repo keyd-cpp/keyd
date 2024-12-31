@@ -4,18 +4,20 @@
 #include <sys/resource.h>
 #include "../src/keyd.h"
 #include <memory>
+#include <string>
 
 #define MAX_EVENTS 1024
 
 struct key_event output[MAX_EVENTS];
 size_t noutput = 0;
+std::string input;
 
 static uint64_t get_time_ns()
 {
 	struct timespec ts;
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 
-	return (uint64_t)(ts.tv_sec*1E9)+(uint64_t)ts.tv_nsec;
+	return uint64_t(ts.tv_sec) * 1'000'000'000 + ts.tv_nsec;
 }
 
 static uint16_t lookup_code(const char *name)
@@ -149,6 +151,11 @@ static int parse_events(char *s, struct key_event in[MAX_EVENTS], size_t *nin,
 			break;
 		*end = 0;
 
+		if (!::input.ends_with("\n\n")) {
+			::input += line;
+			::input += '\n';
+		}
+
 		len = strlen(line);
 
 		ln++;
@@ -211,6 +218,7 @@ uint64_t run_test(struct keyboard *kbd, const char *path)
 	struct key_event expected[MAX_EVENTS];
 	size_t nexpected;
 
+	::input.clear();
 	if (parse_events(data, input, &ninput, expected, &nexpected) < 0) {
 		fprintf(stderr, "Failed to parse input\n");
 		exit(-1);
@@ -219,17 +227,20 @@ uint64_t run_test(struct keyboard *kbd, const char *path)
 	noutput = 0;
 
 	time = get_time_ns();
-	kbd_process_events(kbd, input, ninput);
-	time = get_time_ns()-time;
+	kbd_process_events(kbd, input, ninput, true);
+	time = get_time_ns() - time;
+	fflush(stdout);
 
 	if (cmp_events(output, noutput, expected, nexpected)) {
+		printf("Input: \n%s", ::input.c_str());
 		printf("%s \033[31;1mFAILED\033[0m\n", path);
 		print_diff(expected, nexpected, output, noutput);
 		exit(-1);
 	} else {
-		printf("%s \033[32;1mPASSED\033[0m (%zu us)\n", path, time/1000);
+		printf("%s \033[32;1mPASSED\033[0m (%zu us)\n", path, time / 1000);
 	}
 
+	fflush(stdout);
 	return time;
 }
 
@@ -241,6 +252,11 @@ int main(int argc, char *argv[])
 {
 	rlimit lim{rlim_t(-1), rlim_t(-1)};
 	setrlimit(RLIMIT_CORE, &lim);
+
+	if (setvbuf(stdout, nullptr, _IOFBF, 256 * 1024)) {
+		perror("setvbuf");
+		return -1;
+	}
 
 	size_t i;
 	struct config config;
@@ -269,7 +285,7 @@ int main(int argc, char *argv[])
 	for (i = 2; i < argc; i++)
 		total_time += run_test(kbd.get(), argv[i]);
 
-	printf("\nTotal time spent in the main loop: %zu us\n", total_time/1000);
+	printf("\nTotal time spent in the main loop: %zu us\n", total_time / 1000);
 	return 0;
 }
 

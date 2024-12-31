@@ -1,8 +1,6 @@
 #include "keyd.h"
 #include "macro.h"
 #include "config.h"
-#include <numeric>
-#include <span>
 
 /*
  * Parses expressions of the form: C-t type(hello) enter
@@ -13,7 +11,7 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 {
 	constexpr std::string_view spaces = " \t\r\n";
 
-	#define ADD_ENTRY(t, d) macro.emplace_back(macro_entry{.type = t, .mods = 0, .code = static_cast<uint16_t>(d)})
+	#define ADD_ENTRY(t, d) macro.emplace_back(macro_entry{.type = t, .id = static_cast<uint16_t>(d), .code = static_cast<uint16_t>(d)})
 
 	std::string buf;
 	while (!(s = s.substr(std::min(s.size(), s.find_first_not_of(spaces)))).empty()) {
@@ -33,7 +31,7 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 				err("incomplete macro command found");
 				return -1;
 			}
-			if (is_cmd && config->commands.size() > std::numeric_limits<decltype(descriptor_arg::idx)>::max()) {
+			if (is_cmd && config->commands.size() > INT16_MAX) {
 				err("max commands exceeded");
 				return -1;
 			}
@@ -61,17 +59,17 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 							const char *shiftname = keycode_table[i].shifted_name;
 
 							if (name.size() == 1 && name[0] == tok[0]) {
-								ADD_ENTRY(MACRO_KEYSEQUENCE, i);
+								ADD_ENTRY(MACRO_KEYSEQUENCE, i).mods = {};
 								break;
 							}
 
 							if (shiftname && shiftname[0] == tok[0] && shiftname[1] == 0) {
-								ADD_ENTRY(MACRO_KEYSEQUENCE, i).mods = MOD_SHIFT;
+								ADD_ENTRY(MACRO_KEYSEQUENCE, i).mods = { .mods = MOD_SHIFT, .wildc = 0 };
 								break;
 							}
 
 							if (altname && altname[0] == tok[0] && altname[1] == 0) {
-								ADD_ENTRY(MACRO_KEYSEQUENCE, i);
+								ADD_ENTRY(MACRO_KEYSEQUENCE, i).mods = {};
 								break;
 							}
 						}
@@ -79,7 +77,7 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 							break;
 						}
 					} else if ((xcode = unicode_lookup_index(codepoint)) > 0) {
-						ADD_ENTRY(MACRO_UNICODE, xcode);
+						ADD_ENTRY(MACRO_UNICODE, xcode).id = 0;
 					}
 
 					tok.remove_prefix(chrsz);
@@ -97,19 +95,29 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 		buf.resize(str_escape(buf.data()));
 		tok = buf;
 		uint8_t mods;
+		uint8_t wildc;
 		uint16_t code;
 
-		if (!parse_key_sequence(tok, &code, &mods)) {
-			ADD_ENTRY(MACRO_KEYSEQUENCE, code).mods = mods;
+		if (parse_key_sequence(tok, &code, &mods, &wildc) == 0 && code) {
+			if (wildc) {
+				// Wildcard is only allowed in single-key macro
+				err("%.*s has a wildcard inside a macro", (int)tok.size(), tok.data());
+				return -1;
+			}
+			macro.emplace_back(macro_entry{
+				.type = MACRO_KEYSEQUENCE,
+				.id = code,
+				.mods = { .mods = mods, .wildc = 0 },
+			});
 			continue;
 		} else if (tok.find_first_of('+') + 1) {
 			for (auto key : split_char<'+'>(tok)) {
 				if (key.ends_with("ms") && key.find_first_not_of("0123456789") == key.size() - 2)
 					ADD_ENTRY(MACRO_TIMEOUT, atoi(key.data()));
-				else if (!parse_key_sequence(key, &code, &mods))
+				else if (parse_key_sequence(key, &code, &mods, &wildc) == 0 && code && !mods && !wildc)
 					ADD_ENTRY(MACRO_HOLD, code);
 				else {
-					err("%.*s is not a valid key", (int)key.size(), key.data());
+					err("%.*s is not a valid compound key or timeout", (int)key.size(), key.data());
 					return -1;
 				}
 			}
@@ -131,12 +139,12 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 						const char *shiftname = keycode_table[i].shifted_name;
 
 						if (name.size() == 1 && name[0] == tok[0]) {
-							ADD_ENTRY(MACRO_KEYSEQUENCE, i);
+							ADD_ENTRY(MACRO_KEYSEQUENCE, i).mods = {};
 							break;
 						}
 
 						if (shiftname && shiftname[0] == tok[0] && shiftname[1] == 0) {
-							ADD_ENTRY(MACRO_KEYSEQUENCE, i).mods = MOD_SHIFT;
+							ADD_ENTRY(MACRO_KEYSEQUENCE, i).mods = { .mods = MOD_SHIFT, .wildc = 0 };
 							break;
 						}
 					}
@@ -144,7 +152,7 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 						continue;
 					}
 				} else if ((xcode = unicode_lookup_index(codepoint)) > 0) {
-					ADD_ENTRY(MACRO_UNICODE, xcode);
+					ADD_ENTRY(MACRO_UNICODE, xcode).id = 0;
 					continue;
 				}
 			}
@@ -179,7 +187,7 @@ void macro_execute(void (*output)(uint16_t, uint8_t),
 			if (hold_start == -1)
 				hold_start = i;
 
-			output(ent->code, 1);
+			output(ent->id, 1);
 
 			break;
 		case MACRO_RELEASE:
@@ -188,14 +196,14 @@ void macro_execute(void (*output)(uint16_t, uint8_t),
 
 				for (j = hold_start; j < i; j++) {
 					const struct macro_entry *ent = &macro[j];
-					output(ent->code, 0);
+					output(ent->id, 0);
 				}
 
 				hold_start = -1;
 			}
 			break;
 		case MACRO_UNICODE:
-			idx = ent->code | (ent->mods << 16);
+			idx = ent->code | (ent->id << 16);
 
 			unicode_get_sequence(idx, codes);
 
@@ -206,12 +214,12 @@ void macro_execute(void (*output)(uint16_t, uint8_t),
 
 			break;
 		case MACRO_KEYSEQUENCE:
-			code = ent->code;
-			mods = ent->mods;
+			code = ent->id;
+			mods = ent->mods.mods;
 
-			for (j = 0; j < ARRAY_SIZE(modifiers); j++) {
-				uint16_t code = modifiers[j].key;
-				uint8_t mask = modifiers[j].mask;
+			for (j = 0; j < config->modifiers.size(); j++) {
+				uint16_t code = config->modifiers[j][0];
+				uint8_t mask = 1 << j;
 
 				if (mods & mask)
 					output(code, 1);
@@ -223,9 +231,9 @@ void macro_execute(void (*output)(uint16_t, uint8_t),
 			output(code, 1);
 			output(code, 0);
 
-			for (j = 0; j < ARRAY_SIZE(modifiers); j++) {
-				uint16_t code = modifiers[j].key;
-				uint8_t mask = modifiers[j].mask;
+			for (j = 0; j < config->modifiers.size(); j++) {
+				uint16_t code = config->modifiers[j][0];
+				uint8_t mask = 1 << j;
 
 				if (mods & mask)
 					output(code, 0);
@@ -241,6 +249,8 @@ void macro_execute(void (*output)(uint16_t, uint8_t),
 			if (config)
 				execute_command(config->commands.at(ent->code));
 			break;
+		default:
+			continue;
 		}
 
 		if (timeout)

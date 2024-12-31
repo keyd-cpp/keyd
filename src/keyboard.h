@@ -12,6 +12,7 @@
 #include "config.h"
 #include "device.h"
 #include <memory>
+#include <bitset>
 
 #define MAX_ACTIVE_KEYS	32
 #define CACHE_SIZE	16 //Effectively nkro
@@ -21,13 +22,13 @@ struct keyboard;
 struct cache_entry {
 	uint16_t code;
 	struct descriptor d;
-	int dl;
-	int layer;
+	int16_t dl;
+	int16_t layer;
 };
 
 struct key_event {
-	uint32_t code;
-	uint32_t pressed;
+	uint16_t code : 10;
+	uint16_t pressed : 1;
 	int timestamp;
 };
 
@@ -72,6 +73,8 @@ struct keyboard {
 	 */
 	struct cache_entry cache[CACHE_SIZE];
 
+	int16_t layout = 0;
+
 	uint16_t last_pressed_output_code;
 	uint16_t last_pressed_code;
 
@@ -79,7 +82,7 @@ struct keyboard {
 
 	uint16_t inhibit_modifier_guard;
 
-	::macro* active_macro;
+	int active_macro = -1;
 	int active_macro_layer;
 	int overload_last_layer_code;
 
@@ -134,7 +137,8 @@ struct keyboard {
 	};
 	std::vector<layer_state_t> layer_state;
 
-	std::array<uint8_t, KEYD_ENTRY_COUNT> keystate;
+	std::bitset<KEYD_ENTRY_COUNT> capstate;
+	std::bitset<KEYD_ENTRY_COUNT> keystate;
 
 	struct {
 		int x;
@@ -147,7 +151,7 @@ struct keyboard {
 
 std::unique_ptr<keyboard> new_keyboard(std::unique_ptr<keyboard>);
 
-int64_t kbd_process_events(struct keyboard *kbd, const struct key_event *events, size_t n);
+int64_t kbd_process_events(struct keyboard *kbd, const struct key_event *events, size_t n, bool real = false);
 bool kbd_eval(struct keyboard *kbd, std::string_view);
 void kbd_reset(struct keyboard *kbd);
 

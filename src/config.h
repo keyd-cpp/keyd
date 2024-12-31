@@ -61,6 +61,7 @@ static_assert(static_cast<uint16_t>(OP_MAX) <= 64);
 union descriptor_arg {
 	uint16_t code;
 	uint8_t mods;
+	uint8_t wildc;
 	int16_t idx;
 	uint16_t sz;
 	uint16_t timeout;
@@ -70,57 +71,57 @@ union descriptor_arg {
 /* Describes the intended purpose of a key (corresponds to an 'action' in user parlance). */
 
 struct descriptor {
-	uint16_t id : 10;
 	enum op op : 6;
-	union descriptor_arg args[MAX_DESCRIPTOR_ARGS];
+	uint16_t id : 10; // Key associated with descriptor
+	uint8_t mods; // Mods associated with descriptor
+	uint8_t wildcard; // Mod mask that allows mod(s) to be enabled
+	std::array<union descriptor_arg, MAX_DESCRIPTOR_ARGS> args;
+
+	bool operator <(const descriptor&) const;
+	bool operator ==(const descriptor&) const;
+
+	explicit operator bool() const
+	{
+		return op != OP_NULL;
+	}
 };
 
-static_assert(sizeof(descriptor) == 8);
+static_assert(sizeof(descriptor) == 10);
 
 // Experimental flat map with deferred sorting for layer keymap descriptors
 struct descriptor_map {
-	size_t size = 0;
+	bool modified = true; // Belongs to layer (when anything in layer is modified)
+	uint8_t size = 0;
+	static constexpr uint8_t unsorted = -1;
+	static constexpr uint8_t dynamic = -2;
+
 	std::array<descriptor, 3> maps{};
 	std::vector<descriptor> mapv; // Should be empty by default
 
 	void sort();
-	void set(uint16_t id, const descriptor& copy, uint32_t hint = 48);
-	const descriptor& operator[](uint16_t id) const;
+	void set(const descriptor& copy, uint32_t hint = 48);
+	const descriptor& get(const descriptor&) const;
+	const descriptor& operator[](const descriptor&) const;
 };
+
+static_assert(sizeof(descriptor_map) == sizeof(std::vector<char>) + 32);
 
 struct chord {
 	std::array<uint16_t, 8> keys;
 	struct descriptor d;
 };
 
+static_assert(sizeof(chord) == 26);
+
 /*
- * A layer is a map from keycodes to descriptors. It may optionally
- * contain one or more modifiers which are applied to the base layout in
- * the event that no matching descriptor is found in the keymap. For
- * consistency, modifiers are internally mapped to eponymously named
- * layers consisting of the corresponding modifier and an empty keymap.
+ * A layer is a map from keycodes to descriptors.
  */
-
-enum class layer_type_e : signed char {
-	LT_NORMAL,
-	LT_LAYOUT,
-	LT_COMPOSITE,
-};
-
-using enum layer_type_e;
 
 struct layer {
 	std::string name;
-
-	enum layer_type_e type;
-	bool modified = false; // Modified by kbd_eval
-	uint8_t mods;
 	std::vector<chord> chords;
 	descriptor_map keymap;
-
-	/* Used for composite layers. */
-	size_t nr_constituents;
-	int constituents[8];
+	std::u16string set; // Set of layers in composite layer, or empty
 };
 
 struct env_pack {
@@ -147,7 +148,9 @@ struct dev_id {
 struct config {
 	std::string pathstr;
 	std::vector<layer> layers;
-	std::map<std::string, size_t, std::less<>> layer_names;
+	std::array<std::u16string, 8> modifiers;
+	std::map<std::u16string, size_t, std::less<>> layer_sets; // Map for composite layers
+	std::map<std::string, size_t, std::less<>> layer_names; // Map for single layers
 
 	/* Auxiliary descriptors used by layer bindings. */
 	std::vector<descriptor> descriptors;
@@ -171,9 +174,16 @@ struct config {
 	int64_t chord_interkey_timeout;
 	int64_t chord_hold_timeout;
 
+	uint8_t compat = 0;
 	uint8_t wildcard = 0;
 	uint8_t layer_indicator = 255;
-	uint8_t disable_modifier_guard;
+	uint8_t disable_modifier_guard = 0;
+
+	// Section-specific modifiers
+	uint8_t add_left_mods = 0;
+	uint8_t add_left_wildc = 0;
+	uint8_t add_right_mods = 0;
+	uint8_t add_right_wildc = 0;
 	std::string default_layout;
 
 	config() = default;
@@ -194,6 +204,7 @@ struct config_backup {
 	size_t cmd_count;
 	// These ones are nasty
 	std::vector<layer_backup> layers;
+	decltype(config::modifiers) mods;
 
 	explicit config_backup(const struct config& cfg);
 	~config_backup();

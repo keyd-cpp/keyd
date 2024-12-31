@@ -12,13 +12,19 @@
 #include <string_view>
 #include <array>
 
+#define MOD_NUMLOCK	0x80
+#define MOD_LEVEL5	0x40
+#define MOD_HYPER	0x20
 #define MOD_ALT_GR	0x10
 #define MOD_CTRL	0x8
 #define MOD_SHIFT	0x4
 #define MOD_SUPER	0x2
 #define MOD_ALT		0x1
 
-#define MAX_MOD 5
+// Mod codes
+constexpr std::string_view mod_ids = "AMSCGHLN";
+
+#define MAX_MOD		8
 
 struct keycode_table_ent {
 	const char *b_name;
@@ -305,15 +311,25 @@ struct modifier {
 // #define KEYD_CHORD_2			0x303
 // #define KEYD_CHORD_MAX			0x304
 
+#define KEYD_FAKEMOD			900
+#define KEYD_FAKEMOD_ALT		900
+#define KEYD_FAKEMOD_SUPER		901
+#define KEYD_FAKEMOD_SHIFT		902
+#define KEYD_FAKEMOD_CTRL		903
+#define KEYD_FAKEMOD_ALTGR		904
+#define KEYD_FAKEMOD_HYPER		905
+#define KEYD_FAKEMOD_LEVEL5		906
+#define KEYD_FAKEMOD_NUMLOCK	907
+
 #define KEY_NAME(code) (size_t(code) < KEYD_KEY_COUNT ? keycode_table[code].name().data() : "UNKNOWN")
 
-int parse_modset(const char *s, uint8_t *mods);
-int parse_key_sequence(std::string_view, uint16_t* code, uint8_t *mods);
+int parse_key_sequence(std::string_view, uint16_t* code, uint8_t *mods, uint8_t* wildcards = nullptr);
 
 #define KEYD_KEY_COUNT				0x300
 #define KEYD_ENTRY_COUNT			1000
 
-extern const struct modifier modifiers[MAX_MOD];
 extern const std::array<keycode_table_ent, KEYD_ENTRY_COUNT> keycode_table;
+
+std::array<char, 16> modstring(uint8_t mods);
 
 #endif

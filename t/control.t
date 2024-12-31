@@ -17,9 +17,9 @@ control down
 b down
 b up
 control up
-control down
-control up
+rightcontrol down
+rightcontrol up
 b down
 b up
-control down
-control up
+rightcontrol down
+rightcontrol up

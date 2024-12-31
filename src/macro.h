@@ -6,22 +6,34 @@
 #include <vector>
 #include <string_view>
 
-enum class macro_e : signed char {
+enum class macro_e : uint16_t {
 	MACRO_KEYSEQUENCE,
 	MACRO_HOLD,
 	MACRO_RELEASE,
 	MACRO_UNICODE,
 	MACRO_TIMEOUT,
 	MACRO_COMMAND,
+
+	MACRO_MAX,
 };
 
 using enum macro_e;
 
+static_assert(static_cast<uint16_t>(MACRO_MAX) < 64);
+
 struct macro_entry {
-	enum macro_e type;
-	uint8_t mods;
-	uint16_t code;
+	enum macro_e type : 6;
+	uint16_t id : 10;
+	union {
+		struct {
+			uint8_t mods;
+			uint8_t wildc;
+		} mods;
+		uint16_t code;
+	};
 };
+
+static_assert(sizeof(macro_entry) == 4);
 
 /*
  * A series of key sequences optionally punctuated by

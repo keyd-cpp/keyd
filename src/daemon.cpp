@@ -7,23 +7,9 @@
 #define CONFIG_DIR ""
 #endif
 
-struct config_ent {
-	std::unique_ptr<keyboard> kbd;
-	std::unique_ptr<config_ent> next;
-
-	config_ent() = default;
-	config_ent(const config_ent&) = delete;
-	config_ent& operator=(const config_ent&) = delete;
-	~config_ent()
-	{
-		while (std::unique_ptr<config_ent> ent = std::move(next))
-			next = std::move(ent->next);
-	}
-};
-
 static int ipcfd = -1;
 static std::shared_ptr<struct vkbd> vkbd;
-static std::unique_ptr<config_ent> configs;
+static std::vector<std::unique_ptr<keyboard>> configs;
 extern std::vector<device> device_table;
 
 static std::array<uint8_t, KEY_CNT> keystate{};
@@ -78,7 +64,7 @@ static struct keyboard *active_kbd = NULL;
 
 static void cleanup()
 {
-	configs.reset();
+	configs.clear();
 	vkbd.reset();
 }
 
@@ -114,28 +100,14 @@ static void add_listener(::listener con)
 
 	if (active_kbd) {
 		struct config *config = &active_kbd->config;
-		struct layer *layout = &config->layers[0];
-
-		for (size_t i = 1; i < config->layers.size(); i++)
-			if (active_kbd->layer_state[i].active) {
-				struct layer *layer = &config->layers[i];
-
-				if (layer->type == LT_LAYOUT) {
-					layout = layer;
-					break;
-				}
-			}
-
-		dprintf(con, "/%s\n", layout->name.c_str());
+		dprintf(con, "/%s\n", config->layers[active_kbd->layout].name.c_str());
 
 		for (size_t i = 0; i < config->layers.size(); i++) {
 			if (active_kbd->layer_state[i].active) {
-				ssize_t ret;
 				struct layer *layer = &config->layers[i];
 
-				if (layer->type != LT_LAYOUT) {
-					ret = dprintf(con, "+%s\n", layer->name.c_str());
-					if (ret < 0)
+				if (i != size_t(active_kbd->layout)) {
+					if (dprintf(con, "+%s\n", layer->name.c_str()) < 0)
 						return;
 				}
 			}
@@ -153,7 +125,7 @@ static void activate_leds(const struct keyboard *kbd)
 	int active_layers = 0;
 
 	for (size_t i = 1; i < kbd->config.layers.size(); i++)
-		if (kbd->config.layers[i].type != LT_LAYOUT && kbd->layer_state[i].active) {
+		if (i != size_t(kbd->layout) && kbd->layer_state[i].active > 0) {
 			active_layers = 1;
 			break;
 		}
@@ -185,7 +157,7 @@ static void on_layer_change(const struct keyboard *kbd, struct layer *layer, uin
 	}
 
 	char c = '/';
-	if (layer->type != LT_LAYOUT)
+	if (kbd->layout != (layer - kbd->config.layers.data()))
 		c = state ? '+' : '-';
 
 	std::erase_if(listeners, [&](::listener& listener) {
@@ -202,7 +174,7 @@ static void load_configs()
 		exit(-1);
 	}
 
-	configs.reset();
+	configs.clear();
 
 	while (struct dirent* dirent = readdir(dh)) {
 		if (dirent->d_type == DT_DIR)
@@ -210,8 +182,6 @@ static void load_configs()
 
 		auto name = concat(CONFIG_DIR "/", dirent->d_name);
 		if (name.ends_with(".conf")) {
-			auto ent = std::make_unique<config_ent>();
-
 			keyd_log("CONFIG: parsing b{%s}\n", name.c_str());
 
 			auto kbd = std::make_unique<keyboard>();
@@ -224,9 +194,7 @@ static void load_configs()
 				kbd->original_config.reserve(2);
 				kbd->original_config.emplace_back(kbd->config);
 
-				ent->kbd = std::move(kbd);
-				ent->next = std::move(configs);
-				configs = std::move(ent);
+				configs.emplace_back(std::move(kbd));
 			} else {
 				keyd_log("DEVICE: y{WARNING} failed to parse %s\n", name.c_str());
 			}
@@ -237,21 +205,18 @@ static void load_configs()
 	closedir(dh);
 }
 
-static struct config_ent *lookup_config_ent(const char *id, uint8_t flags)
+static std::unique_ptr<keyboard>* lookup_config_ent(const char *id, uint8_t flags)
 {
-	struct config_ent *ent = configs.get();
-	struct config_ent *match = NULL;
+	std::unique_ptr<keyboard>* match = nullptr;
 	int rank = 0;
 
-	while (ent) {
-		int r = config_check_match(&ent->kbd->config, id, flags);
+	for (auto& kbd : configs) {
+		int r = config_check_match(&kbd->config, id, flags);
 
 		if (r > rank) {
-			match = ent;
+			match = &kbd;
 			rank = r;
 		}
-
-		ent = ent->next.get();
 	}
 
 	return match;
@@ -260,7 +225,6 @@ static struct config_ent *lookup_config_ent(const char *id, uint8_t flags)
 static void manage_device(struct device *dev)
 {
 	uint8_t flags = 0;
-	struct config_ent *ent;
 
 	if (dev->is_virtual)
 		return;
@@ -272,7 +236,7 @@ static void manage_device(struct device *dev)
 	if (dev->capabilities & CAP_MOUSE_ABS)
 		flags |= ID_ABS_PTR;
 
-	if ((ent = lookup_config_ent(dev->id, flags))) {
+	if (auto ent = lookup_config_ent(dev->id, flags)) {
 		if (device_grab(dev)) {
 			keyd_log("DEVICE: y{WARNING} Failed to grab /dev/input/%u\n", dev->num);
 			dev->data = NULL;
@@ -280,11 +244,11 @@ static void manage_device(struct device *dev)
 		}
 
 		keyd_log("DEVICE: g{match}    %s  %s\t(%s)\n",
-			  dev->id, ent->kbd->config.pathstr.c_str(), dev->name);
+			  dev->id, ent->get()->config.pathstr.c_str(), dev->name);
 
-		dev->data = ent->kbd.get();
+		dev->data = ent->get();
 		if (dev->capabilities & CAP_LEDS)
-			device_set_led(dev, ent->kbd->config.layer_indicator, 0);
+			device_set_led(dev, ent->get()->config.layer_indicator, 0);
 	} else {
 		dev->data = NULL;
 		device_ungrab(dev);
@@ -320,23 +284,18 @@ static void reload(std::shared_ptr<env_pack> env)
 		if (buf.empty())
 			return;
 
-		for (auto ent = configs.get(); ent; ent = ent->next.get()) {
-			ent->kbd->config.cfg_use_uid = env->uid;
-			ent->kbd->config.cfg_use_gid = env->gid;
-			ent->kbd->config.env = env;
+		for (auto& kbd : configs) {
+			kbd->config.cfg_use_uid = env->uid;
+			kbd->config.cfg_use_gid = env->gid;
+			kbd->config.env = env;
 			for (auto str : split_char<'\n'>(buf)) {
 				if (str.empty())
 					continue;
-				if (!kbd_eval(ent->kbd.get(), str))
+				if (!kbd_eval(kbd.get(), str))
 					keyd_log("Invalid binding: %.*s\n", (int)str.size(), str.data());
 			}
-			ent->kbd->original_config.emplace_back(ent->kbd->config);
+			kbd->original_config.emplace_back(kbd->config);
 		}
-	}
-
-	for (auto ent = configs.get(); ent; ent = ent->next.get()) {
-		for (auto& layer : ent->kbd->config.layers)
-			layer.keymap.sort();
 	}
 }
 
@@ -385,7 +344,7 @@ static int input(char *buf, [[maybe_unused]] size_t sz, uint32_t timeout)
 			s[1] = 0;
 
 			found = 1;
-			if (!parse_key_sequence(s, &code, &mods)) {
+			if (!parse_key_sequence(s, &code, &mods) && code) {
 				if (mods & MOD_SHIFT) {
 					vkbd_send_key(vkbd, KEYD_LEFTSHIFT, 1);
 					vkbd_send_key(vkbd, code, 1);
@@ -491,11 +450,11 @@ static bool handle_message(::listener& con, struct config* config, std::shared_p
 
 		msg.data[msg.sz] = 0;
 
-		for (auto ent = configs.get(); ent; ent = ent->next.get()) {
-			ent->kbd->config.cfg_use_uid = config->cfg_use_uid;
-			ent->kbd->config.cfg_use_gid = config->cfg_use_gid;
-			ent->kbd->config.env = config->env;
-			success |= kbd_eval(ent->kbd.get(), msg.data);
+		for (auto& kbd : configs) {
+			kbd->config.cfg_use_uid = config->cfg_use_uid;
+			kbd->config.cfg_use_gid = config->cfg_use_gid;
+			kbd->config.env = config->env;
+			success |= kbd_eval(kbd.get(), msg.data);
 		}
 
 		if (success)
@@ -596,7 +555,7 @@ static int event_handler(struct event *ev)
 				kev.pressed = ev->devev->pressed;
 				kev.timestamp = ev->timestamp;
 
-				timeout = kbd_process_events(kbd, &kev, 1);
+				timeout = kbd_process_events(kbd, &kev, 1, true);
 				break;
 			case DEV_MOUSE_MOVE:
 				if (kbd->scroll.active) {

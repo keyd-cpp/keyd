@@ -17,13 +17,9 @@ meta down
 control down
 meta up
 control up
-meta down
-control down
-meta up
-control up
+rightmeta down
+rightmeta up
 b down
 b up
-meta down
-control down
-meta up
-control up
+rightmeta down
+rightmeta up

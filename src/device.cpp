@@ -337,7 +337,7 @@ int device_grab(struct device *dev)
 	 * key up events propagate.
 	 */
 
-	while (1) {
+	for (size_t i = 0; i < 1000; i++) {
 		int n = 0;
 		memset(state, 0, sizeof(state));
 
@@ -355,12 +355,18 @@ int device_grab(struct device *dev)
 			break;
 		else
 			pending_release = 1;
+		usleep(1000);
 	}
 
 	if (pending_release) {
+		for (i = 0; i < KEY_MAX; i++) {
+			if ((state[i / 8] >> (i % 8)) & 0x1)
+				printf("Waiting for key %s...\n", KEY_NAME(i));
+		}
+
 		//Allow the key up events to propagate before
 		//grabbing the device.
-		usleep(100);
+		usleep(50'000);
 	}
 
 	if (dev->capabilities & CAP_LEDS && ioctl(dev->fd, EVIOCGLED(LED_CNT), dev->led_state) < 0) {
