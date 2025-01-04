@@ -1357,6 +1357,13 @@ bool kbd_eval(struct keyboard* kbd, std::string_view exp)
 		while (kbd->original_config.size() > 1)
 			kbd->original_config.pop_back();
 		return true;
+	} else if (exp == "unbind_all") {
+		for (auto& layer : kbd->config.layers) {
+			layer.chords.clear();
+			layer.keymap.size = 0;
+			layer.keymap.mapv.clear();
+			layer.keymap.modified = true;
+		}
 	} else {
 		if (int idx = config_add_entry(&kbd->config, exp); idx >= 0) {
 			kbd->layer_state.resize(kbd->config.layers.size());
