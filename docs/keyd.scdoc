@@ -562,6 +562,9 @@ A key may optionally be bound to an _action_ which accepts zero or more argument
 *overload(<layer>, <action>)*
 	Activates the given layer while held and executes <action> on tap.
 
+*overloadm(<layer>, <macro>, <action>)*
+	Same as overload but executes a macro immediately.
+
 *overloadt(<layer>, <action>, <timeout>)*
 	Identical to overload, but only activates the layer if the bound key is
 	held for \<timeout\> milliseconds. This is mainly useful for overloading keys

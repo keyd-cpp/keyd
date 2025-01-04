@@ -595,6 +595,7 @@ static int64_t process_descriptor(struct keyboard *kbd, uint16_t code, const str
 		case OP_LAYERM:
 		case OP_ONESHOTM:
 		case OP_TOGGLEM:
+		case OP_OVERLOADM:
 			execute_macro(kbd, dl, d->args[1].code, code);
 			break;
 		default:
@@ -747,8 +748,9 @@ static int64_t process_descriptor(struct keyboard *kbd, uint16_t code, const str
 			clear(kbd);
 		break;
 	case OP_OVERLOAD:
+	case OP_OVERLOADM:
 		idx = d->args[0].idx;
-		action = &kbd->config.descriptors[d->args[1].idx];
+		action = &kbd->config.descriptors[d->args[d->op == OP_OVERLOADM ? 2 : 1].idx];
 		if (!idx)
 			idx = auto_layer();
 
