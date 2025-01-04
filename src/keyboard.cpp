@@ -142,7 +142,7 @@ static void set_mods(struct keyboard *kbd, uint8_t mods)
 	}
 }
 
-static void update_mods(struct keyboard *kbd, [[maybe_unused]] int excl, uint8_t mods, uint8_t wildcard = -1)
+static void update_mods(struct keyboard *kbd, [[maybe_unused]] int excl, uint8_t mods, uint8_t wildcard = -1, uint16_t code = -1)
 {
 	struct layer *excluded_layer = nullptr;
 	if (kbd->config.compat && excl >= 0)
@@ -166,10 +166,20 @@ static void update_mods(struct keyboard *kbd, [[maybe_unused]] int excl, uint8_t
 
 		if (!excluded)
 			mods |= 1 << (i - 1);
-		addm |= 1 << (i - 1);
 	}
 
-	set_mods(kbd, mods & wildcard);
+	for (size_t i = 0; i < CACHE_SIZE; i++) {
+		// Check active keysequences for mods being active or suppressed
+		if (auto& ce = kbd->cache[i]; ce.code && ce.d.op == OP_KEYSEQUENCE) {
+			if (ce.d.args[0].code == code)
+				continue;
+			uint8_t c_wildc = ce.d.args[2].wildc;
+			uint8_t c_mods = ce.d.args[1].mods;
+			addm |= c_mods & ~c_wildc; // Required mods
+			wildcard &= c_wildc; // Least common wildcard
+		}
+	}
+	set_mods(kbd, (mods & wildcard) | addm);
 }
 
 static uint8_t get_mods(struct keyboard* kbd)
@@ -628,14 +638,14 @@ static int64_t process_descriptor(struct keyboard *kbd, uint16_t code, const str
 
 		if (pressed) {
 			/*
-			 * Permit variations of the same key
-			 * to be actuated next to each other
-			 * E.G [/{
-			 */
+			* Permit variations of the same key
+			* to be actuated next to each other
+			* E.G [/{
+			*/
 			if (kbd->keystate[new_code])
 				send_key(kbd, new_code, 0);
 
-			update_mods(kbd, dl, mods, wildcard | mods);
+			update_mods(kbd, dl, mods, wildcard | mods, new_code);
 
 			send_key(kbd, new_code, 1);
 			clear_oneshot(kbd, "key");
