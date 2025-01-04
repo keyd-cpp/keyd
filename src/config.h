@@ -44,7 +44,6 @@ enum class op : uint16_t {
 
 	OP_MACRO,
 	OP_MACRO2,
-	OP_COMMAND,
 	OP_TIMEOUT,
 
 /* Experimental */

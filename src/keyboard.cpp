@@ -861,13 +861,6 @@ static int64_t process_descriptor(struct keyboard *kbd, uint16_t code, const str
 		}
 
 		break;
-	case OP_COMMAND:
-		if (pressed) {
-			execute_command(kbd->config.commands[d->args[0].idx]);
-			clear_oneshot(kbd, "cmd");
-			update_mods(kbd, -1, 0);
-		}
-		break;
 	case OP_SWAP:
 	case OP_SWAPM:
 		idx = abs(d->args[0].idx);

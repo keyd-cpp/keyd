@@ -91,21 +91,20 @@ for (`xmodmap -pke`) {
 }
 
 `setxkbmap -query` =~ /layout:\s*(\S*)/;
-$shift_layer = "$1_shift";
 
 print "[$1]\n\n";
-print "$_ = $keymap{$_}\n" foreach (sort keys %keymap);
+print "$_ = type($keymap{$_})\n" foreach (sort keys %keymap);
 print "\n";
 
 print "[S-$1]\n";
-print "$_ = $shifted_keymap{$_}\n" foreach (sort keys %shifted_keymap);
+print "$_ = type($shifted_keymap{$_})\n" foreach (sort keys %shifted_keymap);
 
 if (%altgr_keymap) {
 	print "\n";
 	print "[G-$1]\n";
-	print "$_ = $altgr_keymap{$_}\n" foreach (sort keys %altgr_keymap);
+	print "$_ = type($altgr_keymap{$_})\n" foreach (sort keys %altgr_keymap);
 	print "\n";
 
 	print "[G-S-$1]\n";
-	print "$_ = $shifted_altgr_keymap{$_}\n" foreach (sort keys %shifted_altgr_keymap);
+	print "$_ = type($shifted_altgr_keymap{$_})\n" foreach (sort keys %shifted_altgr_keymap);
 }

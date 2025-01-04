@@ -639,26 +639,18 @@ static int parse_macro_expression(std::string_view s, macro& macro, struct confi
 	if (s.starts_with("macro(") && s.ends_with(')')) {
 		s.remove_suffix(1);
 		s.remove_prefix(6);
+	} else if (s.ends_with(')') && (s.starts_with("type(") || s.starts_with("text(") || s.starts_with("t(") || s.starts_with("txt("))) {
+		// Pass to macro_parse as is
+	} else if ((s.starts_with("cmd(") || s.starts_with("command(")) && s.ends_with(')')) {
+		// Same
 	} else if (utf8_strlen(s) != 1) {
 		err("Invalid macro: %.*s\n", (int)s.size(), s.data());
 		return -1;
+	} else {
+		warn("Naked unicode is deprecated, use type(): %.*s", (int)s.size(), s.data());
 	}
 
 	return macro_parse(s, macro, config) == 0 ? 0 : 1;
-}
-
-static int parse_command(const char *s, std::string& command)
-{
-	size_t len = strlen(s);
-
-	if (len == 0 || strstr(s, "command(") != s || s[len-1] != ')')
-		return -1;
-
-	command = s + 8;
-	command.pop_back(); // Remove )
-	command.resize(str_escape(command.data()));
-
-	return 0;
 }
 
 static int parse_descriptor(char *s,
@@ -687,26 +679,6 @@ static int parse_descriptor(char *s,
 		d->args[0].code = code;
 		d->args[1].mods = mods | config->add_right_mods;
 		d->args[2].wildc = wildc | config->add_right_wildc;
-		return 0;
-	} else if ((ret = parse_command(s, cmd)) >= 0) {
-		if (ret) {
-			return -1;
-		}
-
-		if (config->commands.size() >= INT16_MAX) {
-			err("max commands exceeded");
-			return -1;
-		}
-
-		d->op = OP_COMMAND;
-		d->args[0].idx = config->commands.size();
-		config->commands.emplace_back(::ucmd{
-			.uid = config->cfg_use_uid,
-			.gid = config->cfg_use_gid,
-			.cmd = std::move(cmd),
-			.env = config->env,
-		});
-
 		return 0;
 	} else if ((ret = parse_macro_expression(s, macro, config, &wildc)) >= 0) {
 		if (ret)

@@ -16,8 +16,9 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 	std::string buf;
 	while (!(s = s.substr(std::min(s.size(), s.find_first_not_of(spaces)))).empty()) {
 		std::string_view tok = s.substr(0, s.find_first_of(spaces));
-		if (tok.starts_with("cmd(") || tok.starts_with("type(") || tok.starts_with("text(") || tok.starts_with("txt(") || tok.starts_with("t(")) {
-			const bool is_cmd = tok.starts_with("cmd(");
+		const bool is_txt = tok.starts_with("type(") || tok.starts_with("text(") || tok.starts_with("txt(") || tok.starts_with("t(");
+		const bool is_cmd = tok.starts_with("cmd(") || tok.starts_with("command(");
+		if (is_txt || is_cmd) {
 			s.remove_prefix(tok.find_first_of('(') + 1);
 			for (size_t i = 0; i < s.size(); i++) {
 				if (s[i] == '\\')
