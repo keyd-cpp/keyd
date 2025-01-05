@@ -121,7 +121,7 @@ test:
 test-io:
 	mkdir -p bin
 	$(CXX) \
-	-std=c++20 \
+	-std=c++20 -g -O2 \
 	-DDATA_DIR= \
 	-o bin/test-io \
 		t/test-io.cpp \

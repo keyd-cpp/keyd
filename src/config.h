@@ -90,21 +90,21 @@ static_assert(sizeof(descriptor) == 10);
 
 // Experimental flat map with deferred sorting for layer keymap descriptors
 struct descriptor_map {
-	bool modified = true; // Belongs to layer (when anything in layer is modified)
-	uint8_t size = 0;
-	static constexpr uint8_t unsorted = -1;
-	static constexpr uint8_t dynamic = -2;
+	// uint8_t size = 0;
+	// static constexpr uint8_t unsorted = -1;
+	// static constexpr uint8_t dynamic = -2;
+	// std::array<descriptor, 3> maps{};
 
-	std::array<descriptor, 3> maps{};
 	std::vector<descriptor> mapv; // Should be empty by default
 
 	void sort();
 	void set(const descriptor& copy, uint32_t hint = 48);
-	const descriptor& get(const descriptor&) const;
 	const descriptor& operator[](const descriptor&) const;
+
+	bool empty() const { return mapv.empty(); }
 };
 
-static_assert(sizeof(descriptor_map) == sizeof(std::vector<char>) + 32);
+static_assert(sizeof(descriptor_map) == sizeof(std::vector<char>));
 
 struct chord {
 	std::array<uint16_t, 8> keys;
@@ -114,14 +114,56 @@ struct chord {
 static_assert(sizeof(chord) == 26);
 
 /*
- * A layer is a map from keycodes to descriptors.
+ * A layer is a map from keys to descriptors.
  */
 
 struct layer {
 	std::string name;
 	std::vector<chord> chords;
 	descriptor_map keymap;
-	std::u16string set; // Set of layers in composite layer, or empty
+
+	// Iterator over composite layer components
+	struct iterator
+	{
+		using difference_type = ptrdiff_t;
+		using value_type = uint16_t;
+		using pointer = void;
+		using reference = uint16_t;
+		using iterator_category = std::forward_iterator_tag;
+
+		const char* raw_ptr;
+
+		uint16_t operator*() const
+		{
+			// Unaligned read from name
+			uint16_t value;
+			memcpy(&value, this->raw_ptr, sizeof(value));
+			return value;
+		}
+
+		iterator& operator++()
+		{
+			this->raw_ptr += 2;
+			return *this;
+		}
+
+		auto operator<=>(const iterator&) const = default;
+	};
+
+	size_t size() const
+	{
+		return name[0] ? 1 : name.size() / 2;
+	}
+
+	iterator begin() const
+	{
+		return {name.c_str() + (name[0] ? name.size() : 1)};
+	}
+
+	iterator end() const
+	{
+		return {name.c_str() + name.size()};
+	}
 };
 
 struct env_pack {
@@ -148,15 +190,14 @@ struct dev_id {
 struct config {
 	std::string pathstr;
 	std::vector<layer> layers;
+	std::vector<uint16_t> layer_index;
 	std::array<std::u16string, 8> modifiers;
-	std::map<std::u16string, size_t, std::less<>> layer_sets; // Map for composite layers
-	std::map<std::string, size_t, std::less<>> layer_names; // Map for single layers
 
 	/* Auxiliary descriptors used by layer bindings. */
 	std::vector<descriptor> descriptors;
 	std::vector<macro> macros;
 	std::vector<ucmd> commands;
-	std::multimap<std::string, descriptor, std::less<>> aliases;
+	std::map<std::string, std::vector<descriptor>, std::less<>> aliases;
 
 	uid_t cfg_use_uid = 0;
 	gid_t cfg_use_gid = 0;
@@ -209,7 +250,7 @@ struct config_backup {
 	explicit config_backup(const struct config& cfg);
 	~config_backup();
 
-	void restore(struct config& cfg);
+	void restore(struct keyboard* kbd);
 };
 
 int config_parse(struct config *config, const char *path);

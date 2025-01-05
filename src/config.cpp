@@ -91,11 +91,24 @@ static struct {
 
 bool descriptor::operator<(const descriptor& b) const
 {
+	// This complexity only happens during offline sorting, not matching.
+	// Matching uses different logic.
 	if (id == b.id) {
 		if (mods == b.mods) {
-			return wildcard < b.wildcard;
+			auto ap = std::popcount(wildcard);
+			auto bp = std::popcount(b.wildcard);
+			if (ap == bp)
+				return wildcard < b.wildcard;
+			else
+				return ap < bp;
 		}
-		return mods < b.mods;
+		// Sort by count of bits first
+		auto ap = std::popcount(mods);
+		auto bp = std::popcount(b.mods);
+		if (ap == bp)
+			return mods < b.mods;
+		else
+			return ap < bp;
 	}
 	return id < b.id;
 }
@@ -111,105 +124,43 @@ bool descriptor::operator==(const descriptor& b) const
 
 void descriptor_map::sort()
 {
-	if (size <= maps.size()) {
-		std::sort(maps.begin(), maps.begin() + size);
-		return;
-	}
-
-	if (size != unsorted)
-		return;
-
 	std::sort(mapv.begin(), mapv.end());
-	size = dynamic;
 }
 
 void descriptor_map::set(const descriptor& copy, uint32_t hint)
 {
-	auto& found = const_cast<descriptor&>(this->get(copy));
+	const auto found = std::find(mapv.begin(), mapv.end(), copy);
+	if (found != mapv.end()) {
+		*found = copy;
+		return;
+	}
+
 	if (!copy) {
 		return;
 	}
-	if (found) {
-		found = copy;
-		return;
-	}
-	if (size < maps.size()) {
-		maps[size] = copy;
-		size++;
-		return;
-	} else if (size == maps.size()) {
-		mapv.reserve(hint);
-		mapv.assign(maps.begin(), maps.end());
-		size = unsorted;
-	}
-	if (size == dynamic && mapv.back() < copy) {
-		size = dynamic;
-	} else {
-		size = unsorted;
-	}
+
 	mapv.reserve(hint);
 	mapv.emplace_back(copy);
-	return;
-}
-
-const descriptor& descriptor_map::get(const descriptor& copy) const
-{
-	if (size <= maps.size()) {
-		// Static array: always unsorted
-		const auto found = std::find(maps.begin(), maps.end(), copy);
-		if (found != maps.end())
-			return *found;
-	} else if (size == dynamic) {
-		// Sorted binary search
-		const auto found = std::lower_bound(mapv.begin(), mapv.end(), copy);
-		if (found != mapv.end() && *found == copy)
-			return *found;
-	} else {
-		// Unsorted search fallback
-		const auto found = std::find(mapv.begin(), mapv.end(), copy);
-		if (found != mapv.end())
-			return *found;
-	}
-
-	static constexpr descriptor null{};
-	return null;
 }
 
 const descriptor& descriptor_map::operator[](const descriptor& copy) const
 {
-	// Full search range for unsorted mapv
-	auto* begin = mapv.data();
-	auto* end = mapv.data() + mapv.size();
-	if (size <= maps.size()) {
-		begin = maps.data();
-		end = maps.data() + size;
-	} else if (size == dynamic) {
-		// Narrow search range to only key code match
-		auto no_w = copy;
-		no_w.mods = 0;
-		no_w.wildcard = 0;
-		begin += std::lower_bound(mapv.begin(), mapv.end(), no_w) - mapv.begin();
-		no_w.mods = -1;
-		no_w.wildcard = -1;
-		end -= mapv.end() - std::upper_bound(mapv.begin(), mapv.end(), no_w);
-	}
-
-	if (size == unsorted) {
-		warn("Unsorted descriptor map, results may be incorrect.");
-	}
+	// Narrow search range to only key code match
+	auto [begin, end] = std::equal_range(mapv.begin(), mapv.end(), copy, [](const descriptor& a, const descriptor& b) {
+		return a.id < b.id;
+	});
 
 	// Look for exact match first
-	for (auto* it = begin; it != end; it++) {
-		if (copy.id == it->id) [[likely]] {
-			if (!it->wildcard && copy.mods == it->mods)
-				return *it;
-		}
+	for (auto it = begin; it != end; it++) {
+		assert(it->id == copy.id);
+		if (!it->wildcard && copy.mods == it->mods)
+			return *it;
 	}
 
 	// Wildcard fallback
-	for (auto* it = begin; it != end; it++) {
+	for (auto it = begin; it != end; it++) {
 		const uint8_t wc = it->wildcard | it->mods;
-		if (copy.id == it->id && it->wildcard && ((wc & copy.mods) ^ copy.mods) == 0) {
+		if (it->wildcard && ((wc & copy.mods) ^ copy.mods) == 0) {
 			return *it;
 		}
 	}
@@ -249,7 +200,7 @@ static std::string read_file(const char *path, size_t recursion_depth = 0)
 {
 	std::string buf;
 
-	std::string file = file_reader(open(path, O_RDONLY), 4096, [&] {
+	std::string file = file_reader(open(path, O_RDONLY), 512, [&] {
 		err("failed to open %s", path);
 		perror("open");
 	});
@@ -350,13 +301,11 @@ static uint8_t get_mods(long idx)
 
 static uint8_t get_mods(const struct config* cfg, const struct layer* layer)
 {
-	if (layer->set.empty())
+	if (layer->name[0])
 		return get_mods(layer - cfg->layers.data());
 	uint8_t r = 0;
-	for (uint16_t idx : layer->set) {
+	for (uint16_t idx : *layer) {
 		r |= get_mods(idx);
-		if (cfg->layers[idx].set.size())
-			warn("Layer %s: mods not identified", cfg->layers[idx].name.c_str());
 	}
 	return r;
 }
@@ -380,8 +329,20 @@ static int set_layer_entry(const struct config *config,
 
 		for (tok = strtok(key, "+"); tok; tok = strtok(NULL, "+")) {
 			descriptor desc = lookup_keycode(tok);
-			if (!desc || desc.mods || desc.wildcard || desc.id >= KEYD_KEY_COUNT) {
+			if (!desc || desc.mods || desc.wildcard) {
 				err("%s is not a valid key", tok);
+				return -1;
+			}
+
+			for (size_t i = 0; i < MAX_MOD; i++) {
+				if (config->modifiers[i].find_first_of(desc.id) + 1) {
+					desc.id = KEYD_ENTRY_COUNT + i;
+					break;
+				}
+			}
+
+			if (desc.id >= KEYD_ENTRY_COUNT) {
+				err("chord key %s+ is a modifier, did you mean to use %c-key combo?", tok, mod_ids.at(desc.id - KEYD_ENTRY_COUNT));
 				return -1;
 			}
 
@@ -402,13 +363,12 @@ static int set_layer_entry(const struct config *config,
 	} else {
 		std::string_view expr = key;
 		expr.remove_prefix(expr.find_last_of("-*") + 1);
-		auto range = config->aliases.equal_range(expr);
-		if (range.first != range.second) {
+		auto found = config->aliases.find(expr);
+		if (found != config->aliases.end()) {
 			// Lookup mods
 			descriptor aux = lookup_keycode(key);
 			descriptor desc = *d;
-			while (range.first != range.second) {
-				auto& [aname, alias] = *range.first++;
+			for (const auto& alias : found->second) {
 				if (alias.op != OP_KEYSEQUENCE)
 					continue;
 				desc.id = alias.id;
@@ -456,9 +416,10 @@ static int set_layer_entry(const struct config *config,
 	return 0;
 }
 
-static std::u16string layer_composition(struct config* config, std::string_view str)
+static std::pair<std::string, uint16_t> layer_composition(struct config* config, std::string_view str)
 {
 	std::u16string arr;
+	std::string result;
 	for (auto name : split_char<'+'>(str)) {
 		// Disable weird stuff like "a++b"
 		if (name.empty())
@@ -466,6 +427,7 @@ static std::u16string layer_composition(struct config* config, std::string_view 
 		// Remove tautological inclusion of main
 		if (name == config->layers[0].name)
 			continue;
+		uint16_t idx = 0;
 		// Fix name variants
 		if (name == "ctrl")
 			name = "control";
@@ -473,18 +435,36 @@ static std::u16string layer_composition(struct config* config, std::string_view 
 			name = "meta";
 		if (name == "nlock")
 			name = "mod7";
+		for (size_t i = 1; i <= MAX_MOD; i++) {
+			if (name == config->layers[i].name) {
+				idx = i;
+				break;
+			}
+		}
 		// Possibly create new singular layer (ignore layer limit for now)
-		auto [pair, ok] = config->layer_names.try_emplace(std::string(name), config->layers.size());
-		if (ok)
-			config->layers.emplace_back().name.assign(name);
-		arr += char16_t(pair->second);
+		if (!idx) {
+			auto it = std::lower_bound(config->layer_index.begin(), config->layer_index.end(), 0, [&](uint16_t a, int) {
+				if (config->layers[a].size() == 1) {
+					return config->layers[a].name < name;
+				}
+				return false;
+			});
+			if (it == config->layer_index.end() || config->layers[*it].name != name) {
+				idx = config->layers.size();
+				config->layer_index.insert(it, idx);
+				config->layers.emplace_back().name = name;
+			} else {
+				idx = *it;
+			}
+		}
+		arr += char16_t(idx);
 	}
 	std::sort(arr.begin(), arr.end());
 	arr.erase(std::unique(arr.begin(), arr.end()), arr.end());
-	if (arr.empty())
-		arr += u'\0';
-
-	return arr;
+	// Pack constitutients into name, because why not
+	result.push_back('\0');
+	result.insert(1, reinterpret_cast<char*>(arr.data()), arr.size() * 2);
+	return std::make_pair(std::move(result), arr[0]);
 }
 
 /*
@@ -492,7 +472,7 @@ static std::u16string layer_composition(struct config* config, std::string_view 
  * 	Layer index if exists or created
  * 	< 0 on error
  */
-static int config_access_layer(struct config *config, std::string_view name)
+static int config_access_layer(struct config *config, std::string_view name, bool singular = false)
 {
 	if (name.empty()) [[unlikely]]
 		return -1;
@@ -500,16 +480,24 @@ static int config_access_layer(struct config *config, std::string_view name)
 	if (name.find_first_not_of('+') == size_t(-1))
 		return 0;
 
-	std::u16string compose = layer_composition(config, name.substr(0, name.find_first_of(":")));
+	auto&& [compose, single] = layer_composition(config, name.substr(0, name.find_first_of(":")));
 	if (compose.empty())
 		return -1;
 	// Return simple layer
-	if (compose.size() == 1)
-		return compose[0];
+	if (compose.size() / 2 <= 1)
+		return single;
+	if (singular)
+		return -1;
+	auto it = std::lower_bound(config->layer_index.begin(), config->layer_index.end(), 0, [&](uint16_t a, int) {
+		if (config->layers[a].size() == compose.size() / 2) {
+			return config->layers[a].name < compose;
+		}
+		return config->layers[a].size() < compose.size() / 2;
+	});
 	// Return existing layer
-	const auto found = config->layer_sets.find(compose);
-	if (found != config->layer_sets.end())
-		return found->second;
+	if (it != config->layer_index.end() && config->layers[*it].name == compose) {
+		return *it;
+	}
 
 	size_t idx = config->layers.size();
 	if (idx > INT16_MAX) {
@@ -517,12 +505,8 @@ static int config_access_layer(struct config *config, std::string_view name)
 		return -1;
 	}
 	// New composite layer
-	auto& _new = config->layers.emplace_back();
-	config->layer_sets[compose] = idx;
-	_new.name = config->layers[compose[0]].name;
-	for (size_t i = 1; i < compose.size(); i++)
-		_new.name.append("+").append(config->layers[compose[i]].name);
-	_new.set = std::move(compose);
+	config->layer_index.insert(it, idx);
+	config->layers.emplace_back().name = std::move(compose);
 	return idx;
 }
 
@@ -762,7 +746,7 @@ static int parse_descriptor(char *s,
 							arg->idx = -arg->idx;
 						break;
 					case ARG_LAYOUT:
-						arg->idx = config_access_layer(config, argstr);
+						arg->idx = config_access_layer(config, argstr, true);
 						if (arg->idx == -1) {
 							err("%s layout cannot be used", argstr);
 							return -1;
@@ -909,23 +893,24 @@ static void parse_alias_section(struct config *config, struct ini_section *secti
 		if (auto desc = lookup_keycode(ent->key)) {
 			if (name && !desc.mods && !desc.wildcard && desc.id < KEYD_ENTRY_COUNT && name[0] && !name[1]) {
 				// Add modifier keys
-				if (size_t id = mod_ids.find_first_of(name[0]); id + 1) {
+				if (size_t id = mod_ids.find_first_of(name[0]); id + 1 || name == "-"sv) {
 					// Remove this key from any other modifiers
 					for (auto& mods : config->modifiers)
 						std::erase(mods, desc.id);
-					config->modifiers[id].push_back(desc.id);
+					if (id + 1)
+						config->modifiers[id].push_back(desc.id);
 					continue;
 				}
 			}
 			if (name) {
+				// TODO: check possibly incorrect names
 				auto alias = lookup_keycode(name);
 				if (alias) {
-					// TODO: what should be really done by changing meaning of known keys?
 					warn("alias name represents a valid keycode: %s", name);
 				} else {
 					if (alias.wildcard)
 						warn("alias contains wildcard, ignored: %s", name);
-					config->aliases.emplace(name, desc);
+					config->aliases[name].emplace_back(desc);
 				}
 			}
 		} else {
@@ -948,14 +933,15 @@ static int config_parse_string(struct config *config, char *content)
 
 		if (section->name == "ids") {
 			parse_id_section(config, section);
-			section->lnum = -1;
 		} else if (section->name == "aliases") {
 			parse_alias_section(config, section);
-			section->lnum = -1;
 		} else if (section->name == "global") {
 			parse_global_section(config, section);
-			section->lnum = -1;
+		} else {
+			continue;
 		}
+
+		section->entries = {};
 	}
 
 	/* Populate each layer. */
@@ -966,7 +952,7 @@ static int config_parse_string(struct config *config, char *content)
 		if (name.size() != section->name.size())
 			warn("obsolete layer type specifier: %s", section->name.c_str());
 
-		if (section->lnum == size_t(-1))
+		if (section->entries.empty())
 			continue;
 		// Parse section-specific modifiers
 		config->add_right_wildc = 0;
@@ -1013,6 +999,8 @@ static int config_parse_string(struct config *config, char *content)
 			if (config_add_entry(config, entry) < 0)
 				keyd_log("\tr{ERROR:} line m{%zd}: %s\n", ent->lnum, errstr);
 		}
+
+		section->entries = {};
 	}
 
 	config->add_right_wildc = 0;
@@ -1029,15 +1017,15 @@ static void config_init(struct config *config)
 {
 	if (config->layers.empty()) {
 		// Populate special layers
-		config->layer_names[config->layers.emplace_back().name = "main"] = 0;
-		config->layer_names[config->layers.emplace_back().name = "alt"] = 1;
-		config->layer_names[config->layers.emplace_back().name = "meta"] = 2;
-		config->layer_names[config->layers.emplace_back().name = "shift"] = 3;
-		config->layer_names[config->layers.emplace_back().name = "control"] = 4;
-		config->layer_names[config->layers.emplace_back().name = "altgr"] = 5;
-		config->layer_names[config->layers.emplace_back().name = "hyper"] = 6;
-		config->layer_names[config->layers.emplace_back().name = "level5"] = 7;
-		config->layer_names[config->layers.emplace_back().name = "mod7"] = 8;
+		config->layers.emplace_back().name = "main";
+		config->layers.emplace_back().name = "alt";
+		config->layers.emplace_back().name = "meta";
+		config->layers.emplace_back().name = "shift";
+		config->layers.emplace_back().name = "control";
+		config->layers.emplace_back().name = "altgr";
+		config->layers.emplace_back().name = "hyper";
+		config->layers.emplace_back().name = "level5";
+		config->layers.emplace_back().name = "mod7";
 	}
 
 	char default_config[] =
@@ -1176,21 +1164,19 @@ config_backup::config_backup(const struct config& cfg)
 	}
 }
 
-void config_backup::restore(struct config& cfg)
+void config_backup::restore(struct keyboard* kbd)
 {
-	size_t i = 0;
-	for (; i < layers.size(); i++) {
+	::config& cfg = kbd->config;
+	for (size_t i = 0; i < layers.size(); i++) {
 		auto& layer = cfg.layers[i];
-		if (layer.keymap.modified) {
+		if (true /* modified */) {
 			layer.chords = layers[i].chords;
 			layer.keymap = layers[i].keymap;
-			layer.keymap.modified = false;
 		}
 	}
-	for (; i < cfg.layers.size(); i++) {
-		cfg.layer_names.erase(cfg.layers[i].name);
-		cfg.layer_sets.erase(cfg.layers[i].set);
-	}
+	std::erase_if(cfg.layer_index, [&](uint16_t idx) {
+		return idx >= layers.size();
+	});
 	cfg.layers.resize(layers.size());
 	cfg.descriptors.resize(descriptor_count);
 	cfg.macros.resize(macro_count);

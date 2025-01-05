@@ -348,7 +348,7 @@ int parse_key_sequence(std::string_view s, uint16_t* codep, uint8_t *modsp, uint
 					*codep = i;
 
 				return 0;
-			} else if (ent->name() == c || (ent->alt_name && ent->alt_name == c)) {
+			} else if (ent->name() == c || ent->key_num == c || (ent->alt_name && ent->alt_name == c)) {
 
 				if (modsp)
 					*modsp = mods;

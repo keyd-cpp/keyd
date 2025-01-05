@@ -129,13 +129,31 @@ struct keyboard {
 	} pending_key{};
 
 	struct layer_state_t {
-		int64_t activation_time;
+		uint64_t composite : 1; // Set to 1 if layer is composite and not "empty"
+		uint64_t active_s : 8; // Activation count (signed)
+		uint64_t toggled : 1;
+		uint64_t oneshot_depth : 7;
+		uint64_t activation_time : (64 - 17); // Activation order, not timestamp
 
-		uint8_t active;
-		uint8_t toggled;
-		uint8_t oneshot_depth;
+		bool active() const
+		{
+			return static_cast<int8_t>(active_s & 0xff) > 0;
+		}
 	};
+	static_assert(sizeof(layer_state_t) == 8);
 	std::vector<layer_state_t> layer_state;
+	std::vector<uint16_t> active_layers; // Currently not updated, just a buffer
+
+	void update_layer_state()
+	{
+		layer_state.resize(config.layers.size());
+		active_layers.resize(config.layers.size());
+		for (size_t i = 0; i < layer_state.size(); i++) {
+			auto& layer = config.layers[i];
+			// Cache whether the layer is truly composite (not dummy)
+			layer_state[i].composite = !layer.name[0] && (!layer.keymap.empty() || !layer.chords.empty());
+		}
+	}
 
 	std::bitset<KEYD_ENTRY_COUNT> capstate; // Input state
 	std::bitset<KEYD_ENTRY_COUNT> keystate; // Vkbd state

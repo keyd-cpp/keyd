@@ -160,13 +160,18 @@ static void update_mods(struct keyboard *kbd, [[maybe_unused]] int excl, uint8_t
 		struct layer *layer = &kbd->config.layers[i];
 		size_t excluded = 0;
 
-		if (kbd->layer_state[i].active <= 0)
+		if (!kbd->layer_state[i].active())
 			continue;
 
 		if (layer == excluded_layer) {
 			excluded = 1;
-		} else if (excluded_layer && excluded_layer->set.size()) {
-			excluded = excluded_layer->set.find_first_of(i) + 1;
+		} else if (excluded_layer) {
+			for (auto j : *excluded_layer) {
+				if (j == i) {
+					excluded = 1;
+					break;
+				}
+			}
 		}
 
 		if (!excluded)
@@ -193,7 +198,7 @@ static uint8_t get_mods(struct keyboard* kbd)
 
 	for (size_t i = 0; i < MAX_MOD; i++) {
 		uint8_t mask = 1 << i;
-		if (kbd->layer_state[i + 1].active > 0)
+		if (kbd->layer_state[i + 1].active())
 			mods |= mask;
 		if (kbd->keystate[KEYD_FAKEMOD + i])
 			mods |= mask;
@@ -239,7 +244,7 @@ static void lookup_descriptor(struct keyboard *kbd, uint16_t code, struct descri
 {
 	d->op = OP_NULL;
 
-	int64_t maxts = 0;
+	uint64_t maxts = 0;
 
 	if (code >= KEYD_CHORD_1 && code <= KEYD_CHORD_MAX) {
 		size_t idx = code - KEYD_CHORD_1;
@@ -263,19 +268,19 @@ static void lookup_descriptor(struct keyboard *kbd, uint16_t code, struct descri
 	desc.args[1].mods = desc.mods;
 	desc.args[2].wildc = 0xff;
 
-	// Obtain layer set (should not allocate up to 7 entries)
-	// This is one of the cases where fixed array could work better.
-	std::u16string set;
+	size_t set = 0;
 	size_t max = 0;
 
 	for (size_t i = 0; i < kbd->config.layers.size(); i++) {
 		struct layer *layer = &kbd->config.layers[i];
 
-		if (kbd->layer_state[i].active > 0) {
+		if (kbd->layer_state[i].active()) {
 			const auto act_ts = kbd->layer_state[i].activation_time;
 			if (i > 0)
-				set.push_back(i);
-			if (auto match = layer->keymap[desc]; match && act_ts >= maxts) {
+				kbd->active_layers[set++] = i;
+			if (act_ts < maxts)
+				continue;
+			if (auto match = layer->keymap[desc]) {
 				maxts = act_ts;
 				max = 1;
 				*d = match;
@@ -285,18 +290,21 @@ static void lookup_descriptor(struct keyboard *kbd, uint16_t code, struct descri
 	}
 
 	/* Scan for any composite matches (which take precedence). */
-	for (const auto& [layer_set, idx] : kbd->config.layer_sets) {
-		if (set.size() <= 1) [[likely]]
+	for (size_t i = MAX_MOD + 1; i < kbd->config.layers.size(); i++) {
+		if (set <= 1) [[likely]]
 			break;
-		struct layer *layer = &kbd->config.layers[idx];
-		if (layer_set.size() > set.size())
+		// Optimization: don't access uninteresting layers
+		if (kbd->layer_state[i].composite == 0)
 			continue;
-		if (!std::includes(set.begin(), set.end(), layer_set.begin(), layer_set.end()))
+		struct layer *layer = &kbd->config.layers[i];
+		if (layer->size() > set || layer->size() < max)
 			continue;
-		if (auto match = layer->keymap[desc]; match && layer_set.size() >= max) {
-			max = layer_set.size();
+		if (!std::includes(kbd->active_layers.begin(), kbd->active_layers.begin() + set, layer->begin(), layer->end()))
+			continue;
+		if (auto match = layer->keymap[desc]) {
+			max = layer->size();
 			*d = match;
-			*dl = idx;
+			*dl = i;
 		}
 	}
 
@@ -324,22 +332,15 @@ static void deactivate_layer(struct keyboard *kbd, int idx)
 		return;
 	if (idx < 0)
 		return activate_layer(kbd, 0, -idx);
-	if (idx > INT16_MAX) {
-		keyd_log("Ad-hoc composite layers are not implemented (0x%x)\n", idx);
-		return;
-	}
 
 	::layer& layer = kbd->config.layers.at(idx);
-	dbg("Deactivating layer %s", layer.name.c_str());
-
-	if (layer.set.empty()) {
-		// TODO: what to do if it's already zero?
-		if (auto& a = kbd->layer_state[idx].active)
-			a--;
+	if (layer.name[0]) {
+		dbg("Deactivating layer %s", layer.name.c_str());
+		kbd->layer_state[idx].active_s--;
 	} else {
-		for (uint16_t i : layer.set) {
-			if (auto& a = kbd->layer_state[i].active)
-				a--;
+		for (uint16_t i : layer) {
+			dbg("Deactivating layer %s", kbd->config.layers[i].name.c_str());
+			kbd->layer_state[i].active_s--;
 		}
 	}
 
@@ -358,23 +359,23 @@ static void activate_layer(struct keyboard *kbd, uint16_t code, int idx)
 		return;
 	if (idx < 0)
 		return deactivate_layer(kbd, -idx);
-	if (idx > INT16_MAX) {
-		keyd_log("Ad-hoc composite layers are not implemented (0x%x)\n", idx);
-		return;
-	}
 
 	::layer& layer = kbd->config.layers.at(idx);
-	dbg("Activating layer %s", layer.name.c_str());
 	struct cache_entry *ce;
 
 	const auto ts = get_time();
-	if (layer.set.empty()) {
-		kbd->layer_state[idx].activation_time = ts;
-		kbd->layer_state[idx].active++;
+	if (layer.name[0]) {
+		dbg("Activating layer %s", layer.name.c_str());
+		kbd->layer_state[idx].active_s++;
+		if (kbd->layer_state[idx].active())
+			kbd->layer_state[idx].activation_time = ts;
 	} else {
-		for (uint16_t i : layer.set) {
-			kbd->layer_state[i].activation_time = ts;
-			kbd->layer_state[i].active++;
+		for (uint16_t i : layer) {
+			dbg("Activating layer %s", kbd->config.layers[i].name.c_str());
+			auto& state = kbd->layer_state[i];
+			state.active_s++;
+			if (state.active())
+				state.activation_time = ts;
 		}
 	}
 
@@ -449,8 +450,12 @@ static int check_chord_match(struct keyboard *kbd, const struct chord **chord, i
 	for (idx = 0; idx < kbd->config.layers.size(); idx++) {
 		struct layer *layer = &kbd->config.layers[idx];
 
-		if (kbd->layer_state[idx].active <= 0)
+		if (!kbd->layer_state[idx].composite && !kbd->layer_state[idx].active())
 			continue;
+		if (kbd->layer_state[idx].composite) {
+			if (std::any_of(layer->begin(), layer->end(), [&](auto i) { return !kbd->layer_state[i].active(); }))
+				continue;
+		}
 
 		for (size_t i = 0; i < layer->chords.size(); i++) {
 			int ret = chord_event_match(&layer->chords[i],
@@ -458,7 +463,7 @@ static int check_chord_match(struct keyboard *kbd, const struct chord **chord, i
 						    kbd->chord.queue_sz);
 
 			if (ret == 2 &&
-				maxts <= kbd->layer_state[idx].activation_time) {
+				maxts <= int64_t(kbd->layer_state[idx].activation_time)) {
 				*chord_layer = (int)idx;
 				*chord = &layer->chords[i];
 
@@ -554,12 +559,12 @@ static void setlayout(struct keyboard *kbd, int idx)
 
 	// Setting the layout to main is equivalent to clearing all occluding layouts.
 	if (kbd->layout) {
-		if (auto& a = kbd->layer_state[kbd->layout].active)
-			a--;
+		// TODO: this may not actually work as expected
+		kbd->layer_state[kbd->layout].active_s--;
 	}
 	if (idx) {
+		kbd->layer_state[idx].active_s++;
 		kbd->layer_state[idx].activation_time = 1;
-		kbd->layer_state[idx].active++;
 	}
 	kbd->layout = idx;
 	kbd->output.on_layer_change(kbd, &kbd->config.layers[idx], 1);
@@ -614,14 +619,6 @@ static int64_t process_descriptor(struct keyboard *kbd, uint16_t code, const str
 		if (std::popcount(x) == 1) [[likely]] {
 			return std::countr_zero(x) + 1;
 		} else {
-			// Shouldn't really happen
-			std::u16string set;
-			for (int i = 0; i < MAX_MOD; i++)
-				if (x & (1 << i))
-					set.push_back(i + 1);
-			auto found = kbd->config.layer_sets.find(set);
-			if (found != kbd->config.layer_sets.end())
-				return found->second;
 			return x << 16;
 		}
 	};
@@ -955,8 +952,8 @@ std::unique_ptr<keyboard> new_keyboard(std::unique_ptr<keyboard> kbd)
 {
 	size_t i;
 
-	kbd->layer_state.resize(kbd->config.layers.size());
-	kbd->layer_state[0].active = 1;
+	kbd->update_layer_state();
+	kbd->layer_state[0].active_s = 1;
 	kbd->layer_state[0].activation_time = 0;
 	kbd->config.cfg_use_uid = getuid();
 	kbd->config.cfg_use_gid = getuid(); // match uid
@@ -966,8 +963,8 @@ std::unique_ptr<keyboard> new_keyboard(std::unique_ptr<keyboard> kbd)
 		for (i = 1; i < kbd->config.layers.size(); i++) {
 			struct layer *layer = &kbd->config.layers[i];
 
-			if (layer->name == kbd->config.default_layout) {
-				kbd->layer_state[i].active = 1;
+			if (layer->name[0] && layer->name == kbd->config.default_layout) {
+				kbd->layer_state[i].active_s = 1;
 				kbd->layer_state[i].activation_time = 1;
 				kbd->layout = i;
 				found = 1;
@@ -1362,8 +1359,8 @@ bool kbd_eval(struct keyboard* kbd, std::string_view exp)
 	if (exp.empty())
 		return true;
 	if (exp == "reset") {
-		kbd->original_config.back().restore(kbd->config);
-		kbd->layer_state.resize(kbd->config.layers.size());
+		kbd->original_config.back().restore(kbd);
+		kbd->update_layer_state();
 		return true;
 	} else if (exp == "push") {
 		kbd->original_config.emplace_back(kbd->config);
@@ -1381,15 +1378,12 @@ bool kbd_eval(struct keyboard* kbd, std::string_view exp)
 	} else if (exp == "unbind_all") {
 		for (auto& layer : kbd->config.layers) {
 			layer.chords.clear();
-			layer.keymap.size = 0;
-			layer.keymap.mapv.clear();
-			layer.keymap.modified = true;
+			layer.keymap = {};
 		}
 	} else {
 		if (int idx = config_add_entry(&kbd->config, exp); idx >= 0) {
-			kbd->layer_state.resize(kbd->config.layers.size());
-			kbd->config.layers[idx].keymap.modified = true;
 			kbd->config.layers[idx].keymap.sort();
+			kbd->update_layer_state();
 			return true;
 		}
 	}

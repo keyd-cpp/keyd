@@ -14,6 +14,8 @@
 #include <type_traits>
 #include <array>
 
+using namespace std::literals;
+
 template <unsigned Pat = -1u>
 struct split_str;
 

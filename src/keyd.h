@@ -128,7 +128,7 @@ struct file_reader
 		if (fd < 0) [[unlikely]]
 			return result;
 		while (true) {
-			const size_t new_size = rd + 4096;
+			const size_t new_size = rd + this->reserve;
 			result.resize(new_size, 0);
 			const auto rv = read(this->fd, result.data() + rd, new_size - rd);
 			result.resize(rv < 0 ? 0 : (rd += rv));

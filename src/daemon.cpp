@@ -103,7 +103,7 @@ static void add_listener(::listener con)
 		dprintf(con, "/%s\n", config->layers[active_kbd->layout].name.c_str());
 
 		for (size_t i = 0; i < config->layers.size(); i++) {
-			if (active_kbd->layer_state[i].active) {
+			if (active_kbd->layer_state[i].active()) {
 				struct layer *layer = &config->layers[i];
 
 				if (i != size_t(active_kbd->layout)) {
@@ -125,7 +125,7 @@ static void activate_leds(const struct keyboard *kbd)
 	int active_layers = 0;
 
 	for (size_t i = 1; i < kbd->config.layers.size(); i++)
-		if (i != size_t(kbd->layout) && kbd->layer_state[i].active > 0) {
+		if (i != size_t(kbd->layout) && kbd->layer_state[i].active()) {
 			active_layers = 1;
 			break;
 		}
@@ -161,7 +161,14 @@ static void on_layer_change(const struct keyboard *kbd, struct layer *layer, uin
 		c = state ? '+' : '-';
 
 	std::erase_if(listeners, [&](::listener& listener) {
-		return dprintf(listener, "%c%s\n", c, layer->name.c_str()) < 0;
+		if (layer->name[0]) {
+			return dprintf(listener, "%c%s\n", c, layer->name.c_str()) < 0;
+		}
+		for (auto idx : *layer) {
+			if (dprintf(listener, "%c%s\n", c, kbd->config.layers[idx].name.c_str()) < 0)
+				return true;
+		}
+		return false;
 	});
 }
 
@@ -472,8 +479,13 @@ static bool handle_message(::listener& con, struct config* config, std::shared_p
 	return false;
 }
 
-static void handle_client(::listener con)
+[[gnu::noinline]] static void handle_client(int fd)
 {
+	if (fd < 0) {
+		perror("accept");
+		exit(-1);
+	}
+	::listener con(fd);
 	static socklen_t ucred_len = sizeof(struct ucred);
 	struct ucred cred{};
 	if (getsockopt(con, SOL_SOCKET, SO_PEERCRED, &cred, &ucred_len) < 0)
@@ -482,7 +494,7 @@ static void handle_client(::listener con)
 	::config ephemeral_config;
 	ephemeral_config.cfg_use_gid = cred.gid;
 	ephemeral_config.cfg_use_uid = cred.uid;
-	std::shared_ptr<env_pack> prev = nullptr;
+	static std::shared_ptr<env_pack> prev = nullptr;
 	if (!prev || prev->uid != cred.uid || prev->gid != cred.gid)
 		prev.reset();
 	if (getuid() < 1000)
@@ -661,13 +673,7 @@ static int event_handler(struct event *ev)
 		break;
 	case EV_FD_ACTIVITY:
 		if (ev->fd == ipcfd) {
-			::listener con(accept(ipcfd, NULL, 0));
-			if (con < 0) {
-				perror("accept");
-				exit(-1);
-			}
-
-			handle_client(std::move(con));
+			handle_client(accept(ipcfd, NULL, 0));
 		}
 		break;
 	default:
