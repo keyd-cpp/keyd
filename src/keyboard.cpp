@@ -61,7 +61,7 @@ static struct cache_entry *cache_get(struct keyboard *kbd, uint16_t code)
 static void reset_keystate(struct keyboard *kbd)
 {
 	for (size_t i = 0; i < kbd->keystate.size(); i++) {
-		if (kbd->keystate[i]) {
+		if (kbd->keystate[i] && !kbd->freezestate[i]) {
 			kbd->output.send_key(i, 0);
 			kbd->keystate[i] = 0;
 		}
@@ -70,8 +70,13 @@ static void reset_keystate(struct keyboard *kbd)
 
 static void send_key(struct keyboard *kbd, uint16_t code, uint8_t pressed)
 {
-	if (code == KEYD_NOOP || code == KEYD_EXTERNAL_MOUSE_BUTTON)
+	if (code == KEYD_NOOP)
 		return;
+	if (kbd->freezestate[code]) {
+		if (pressed)
+			kbd->keystate[code] = 1;
+		return;
+	}
 	if (code >= kbd->keystate.size()) {
 		err("send_key(): invalid code %u", code);
 		return;
@@ -692,7 +697,7 @@ static int64_t process_descriptor(struct keyboard *kbd, uint16_t code, const str
 	case OP_OVERLOAD_TIMEOUT_TAP:
 	case OP_OVERLOAD_TIMEOUT:
 		if (pressed) {
-			int16_t layer = abs(d->args[0].idx);
+			int16_t layer = d->args[0].idx;
 
 			kbd->pending_key.code = code;
 			kbd->pending_key.behaviour =
@@ -711,15 +716,21 @@ static int64_t process_descriptor(struct keyboard *kbd, uint16_t code, const str
 
 		break;
 	case OP_LAYOUT:
+		idx = d->args[0].idx;
+		if (idx < 0)
+			break;
 		if (pressed)
-			setlayout(kbd, abs(d->args[0].idx));
+			setlayout(kbd, idx);
 
 		break;
 	case OP_LAYERM:
 	case OP_LAYER:
 		idx = d->args[0].idx;
-		if (!idx)
+		if (idx == INT16_MIN)
+			idx = 0;
+		else if (!idx)
 			idx = auto_layer();
+
 
 		// Allow disabling layer with prefix '-'
 		if (pressed) {
@@ -751,7 +762,9 @@ static int64_t process_descriptor(struct keyboard *kbd, uint16_t code, const str
 	case OP_OVERLOADM:
 		idx = d->args[0].idx;
 		action = &kbd->config.descriptors[d->args[d->op == OP_OVERLOADM ? 2 : 1].idx];
-		if (!idx)
+		if (idx == INT16_MIN)
+			idx = 0;
+		else if (!idx)
 			idx = auto_layer();
 
 		if (pressed) {
@@ -781,7 +794,9 @@ static int64_t process_descriptor(struct keyboard *kbd, uint16_t code, const str
 		break;
 	case OP_ONESHOTM:
 	case OP_ONESHOT:
-		idx = abs(d->args[0].idx);
+		idx = d->args[0].idx;
+		if (idx < 0)
+			break;
 		if (!idx)
 			idx = auto_layer();
 
@@ -832,7 +847,9 @@ static int64_t process_descriptor(struct keyboard *kbd, uint16_t code, const str
 		break;
 	case OP_TOGGLEM:
 	case OP_TOGGLE:
-		idx = abs(d->args[0].idx);
+		idx = d->args[0].idx;
+		if (idx < 0)
+			break;
 		if (!idx)
 			idx = auto_layer();
 
@@ -865,7 +882,9 @@ static int64_t process_descriptor(struct keyboard *kbd, uint16_t code, const str
 		break;
 	case OP_SWAP:
 	case OP_SWAPM:
-		idx = abs(d->args[0].idx);
+		idx = d->args[0].idx;
+		if (idx < 0)
+			break;
 		if (!idx)
 			idx = auto_layer();
 

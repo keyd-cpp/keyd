@@ -288,7 +288,6 @@ struct modifier {
 /* Deviations */
 
 #define  KEYD_NOOP                             195
-#define  KEYD_EXTERNAL_MOUSE_BUTTON     196
 #define  KEYD_CHORD_1                  197
 #define  KEYD_CHORD_2                  198
 #define  KEYD_CHORD_MAX                        199
@@ -305,8 +304,6 @@ struct modifier {
 
 // /* Special values. */
 
-// #define KEYD_NOOP             		0x300
-// #define KEYD_EXTERNAL_MOUSE_BUTTON 0x301
 // #define KEYD_CHORD_1			0x302
 // #define KEYD_CHORD_2			0x303
 // #define KEYD_CHORD_MAX			0x304

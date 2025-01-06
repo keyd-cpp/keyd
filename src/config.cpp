@@ -746,6 +746,9 @@ static int parse_descriptor(char *s,
 						} else if (argstr[0] == '*' && argstr[1] == '*' && !argstr[2]) {
 							// Same, since ** are everywhere
 							arg->idx = 0;
+						} else if (argstr[0] == '-' && !argstr[1]) {
+							// Special value: no layer
+							arg->idx = INT16_MIN;
 						} else {
 							arg->idx = config_access_layer(config, argstr + (argstr[0] == '-' && argstr[1]));
 							if (arg->idx <= 0) {
@@ -755,7 +758,7 @@ static int parse_descriptor(char *s,
 						}
 
 						// Layer subtraction (experimental)
-						if (argstr[0] == '-')
+						if (argstr[0] == '-' && arg->idx != INT16_MIN)
 							arg->idx = -arg->idx;
 						break;
 					case ARG_LAYOUT:

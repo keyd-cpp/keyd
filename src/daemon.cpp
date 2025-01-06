@@ -592,19 +592,34 @@ static int event_handler(struct event *ev)
 			default:
 				break;
 			case DEV_MOUSE_SCROLL:
-				/*
-				 * Treat scroll events as mouse buttons so oneshot and the like get
-				 * cleared.
-				 */
 				if (active_kbd) {
-					kev.code = KEYD_EXTERNAL_MOUSE_BUTTON;
+					kev.code = KEYD_NOOP;
 					kev.pressed = 1;
 					kev.timestamp = ev->timestamp;
 
-					kbd_process_events((struct keyboard*)ev->dev->data, &kev, 1);
+					// Check for overlapping with existing key events (not fake ones)
+					if (int32_t(ev->devev->y) > 0 && !kbd->keystate[KEY_SCROLLUP])
+						kev.code = KEY_SCROLLUP;
+					if (int32_t(ev->devev->y) < 0 && !kbd->keystate[KEY_SCROLLDOWN])
+						kev.code = KEY_SCROLLDOWN;
+
+					kbd->freezestate[kev.code] = 1;
+					kbd_process_events(kbd, &kev, 1);
+
+					// Observe key state, by default it just passes through
+					if (ev->devev->y && kev.code != KEYD_NOOP) {
+						if (!kbd->keystate[kev.code])
+							ev->devev->y = 0; // Suppress vertical scrolling
+					}
 
 					kev.pressed = 0;
-					timeout = kbd_process_events((struct keyboard*)ev->dev->data, &kev, 1);
+					timeout = kbd_process_events(kbd, &kev, 1);
+					kbd->freezestate[kev.code] = 0;
+					kbd->keystate[kev.code] = 0;
+
+					// Drop event if no scrolling occured
+					if (!ev->devev->y && !ev->devev->x)
+						break;
 				}
 
 				vkbd_mouse_scroll(vkbd, ev->devev->x, ev->devev->y);
