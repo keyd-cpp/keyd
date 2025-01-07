@@ -98,7 +98,7 @@ int evloop(int (*event_handler) (struct event *ev))
 		}
 
 		// Count backwards
-		for (; i + 1; i--) {
+		for (i = i - 1; ~i; i--) {
 			if (pfdsd[i].revents) {
 				struct device_event *devev = nullptr;
 

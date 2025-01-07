@@ -175,7 +175,7 @@ static std::string resolve_include_path(const char *path, std::string_view inclu
 	std::string tmp;
 
 	if (include_path.ends_with(".conf")) {
-		warn("%s: included file has invalid extension", include_path.data());
+		warn("%.*s: included file has invalid extension", (int)include_path.size(), include_path.data());
 		return {};
 	}
 
@@ -608,12 +608,12 @@ static int parse_macro_expression(std::string_view s, macro& macro, struct confi
 		// Section modifiers are not active inside the macro itself
 		mods |= config->add_right_mods;
 		*wildcard |= mods;
-		macro.reserve(1);
-		macro.emplace_back(macro_entry{
+		macro.size = 1;
+		macro.entry = macro_entry{
 			.type = MACRO_KEYSEQUENCE,
 			.id = code,
 			.mods = { .mods = mods, .wildc = *wildcard },
-		});
+		};
 		return 0;
 	}
 	if (size_t(res) < s.size() && *wildcard != 0xff) {
@@ -876,7 +876,7 @@ static void parse_id_section(struct config *config, struct ini_section *section)
 				.id = {}
 			});
 		} else {
-			warn("%s is not a valid device id", s);
+			warn("%.*s is not a valid device id", (int)s.size(), s.data());
 			continue;
 		}
 

@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 #include <stdlib.h>
-#include <vector>
+#include <memory>
 #include <string_view>
 
 enum class macro_e : uint16_t {
@@ -36,10 +36,19 @@ struct macro_entry {
 static_assert(sizeof(macro_entry) == 4);
 
 /*
- * A series of key sequences optionally punctuated by
- * timeouts
+ * A series of key sequences, timeouts, shell commands
  */
-using macro = std::vector<macro_entry>;
+struct macro {
+	uint32_t size;
+	macro_entry entry;
+	std::unique_ptr<macro_entry[]> entries;
+
+	const macro_entry& operator[](size_t idx) const
+	{
+		assert(idx < size);
+		return size == 1 ? entry : entries[idx];
+	}
+};
 
 void macro_execute(void (*output)(uint16_t, uint8_t),
 		   const macro& macro,

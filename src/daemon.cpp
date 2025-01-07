@@ -486,7 +486,7 @@ static bool handle_message(::listener& con, struct config* config, std::shared_p
 		exit(-1);
 	}
 	::listener con(fd);
-	static socklen_t ucred_len = sizeof(struct ucred);
+	socklen_t ucred_len = sizeof(struct ucred);
 	struct ucred cred{};
 	if (getsockopt(con, SOL_SOCKET, SO_PEERCRED, &cred, &ucred_len) < 0)
 		return;

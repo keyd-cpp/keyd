@@ -1,5 +1,5 @@
 .PHONY: all clean install uninstall debug man compose test-harness
-VERSION=3.0.1-beta
+VERSION=3.0.2-beta
 COMMIT=$(shell git describe --no-match --always --abbrev=7 --dirty)
 VKBD=uinput
 PREFIX?=/usr/local

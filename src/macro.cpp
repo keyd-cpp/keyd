@@ -11,7 +11,9 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 {
 	constexpr std::string_view spaces = " \t\r\n";
 
-	#define ADD_ENTRY(t, d) macro.emplace_back(macro_entry{.type = t, .id = static_cast<uint16_t>(d), .code = static_cast<uint16_t>(d)})
+	std::vector<macro_entry> entries;
+
+	#define ADD_ENTRY(t, d) entries.emplace_back(macro_entry{.type = t, .id = static_cast<uint16_t>(d), .code = static_cast<uint16_t>(d)})
 
 	std::string buf;
 	while (!(s = s.substr(std::min(s.size(), s.find_first_not_of(spaces)))).empty()) {
@@ -105,7 +107,7 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 				err("%.*s has a wildcard inside a macro", (int)tok.size(), tok.data());
 				return -1;
 			}
-			macro.emplace_back(macro_entry{
+			entries.emplace_back(macro_entry{
 				.type = MACRO_KEYSEQUENCE,
 				.id = code,
 				.mods = { .mods = mods, .wildc = 0 },
@@ -162,6 +164,19 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 		err("%.*s is not a valid key sequence", (int)tok.size(), tok.data());
 		return -1;
 	}
+	if (entries.empty()) {
+		err("empty macro");
+		return -1;
+	}
+
+	if (entries.size() == 1) {
+		macro.entry = entries[0];
+		macro.size = 1;
+	} else {
+		macro.size = entries.size();
+		macro.entries = std::make_unique_for_overwrite<macro_entry[]>(entries.size());
+		memcpy(macro.entries.get(), entries.data(), sizeof(macro_entry) * entries.size());
+	}
 
 	return 0;
 
@@ -171,10 +186,9 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 void macro_execute(void (*output)(uint16_t, uint8_t),
 		   const macro& macro, size_t timeout, struct config* config)
 {
-	size_t i;
 	int hold_start = -1;
 
-	for (i = 0; i < macro.size(); i++) {
+	for (size_t i = 0; i < macro.size; i++) {
 		const macro_entry *ent = &macro[i];
 
 		switch (ent->type) {

@@ -224,7 +224,7 @@ static void execute_macro(struct keyboard *kbd, int16_t dl, uint16_t idx, uint16
 {
 	auto& macro = kbd->config.macros[idx & INT16_MAX];
 	/* Minimize redundant modifier strokes for simple key sequences. */
-	if (macro.size() == 1 && macro[0].type == MACRO_KEYSEQUENCE) {
+	if (macro.size == 1 && macro[0].type == MACRO_KEYSEQUENCE) {
 		uint16_t code = macro[0].id;
 		// autokey
 		if (!code)
@@ -929,7 +929,7 @@ static int64_t process_descriptor(struct keyboard *kbd, uint16_t code, const str
 				execute_macro(kbd, dl, d->args[1].code, code);
 		} else if (d->op == OP_SWAPM) {
 			auto& macro = kbd->config.macros[d->args[1].code & INT16_MAX];
-			if (macro.size() == 1 && macro[0].type == MACRO_KEYSEQUENCE) {
+			if (macro.size == 1 && macro[0].type == MACRO_KEYSEQUENCE) {
 				// Why is this necessary?
 				send_key(kbd, macro[0].id, 0);
 				update_mods(kbd, -1, 0);
