@@ -219,7 +219,7 @@ static void execute_macro(struct keyboard *kbd, int16_t dl, uint16_t idx, uint16
 {
 	auto& macro = kbd->config.macros[idx & INT16_MAX];
 	/* Minimize redundant modifier strokes for simple key sequences. */
-	if (macro.size == 1 && macro[0].type == MACRO_KEYSEQUENCE) {
+	if (macro.size == 1 && macro[0].type <= MACRO_KEY_TAP) {
 		uint16_t code = macro[0].id;
 		// autokey
 		if (!code)
@@ -590,22 +590,56 @@ static int64_t calculate_main_loop_timeout(struct keyboard *kbd, int64_t time)
 	return timeout ? timeout - time : 0;
 }
 
+static void do_keysequence(struct keyboard *kbd, int16_t dl, int pressed, int64_t time, uint16_t code, uint8_t mods, uint8_t wildcard)
+{
+	if (pressed) {
+		if (kbd->keystate[code])
+			send_key(kbd, code, 0);
+
+		update_mods(kbd, dl, mods, wildcard | mods, code);
+		send_key(kbd, code, 1);
+		clear_oneshot(kbd, "key");
+	} else {
+		send_key(kbd, code, 0);
+		update_mods(kbd, -1, 0);
+	}
+
+	if (!mods || mods == (1 << MOD_SHIFT))
+		kbd->last_simple_key_time = time;
+}
+
 static int64_t process_descriptor(struct keyboard *kbd, uint16_t code, const struct descriptor *d, int16_t dl, int pressed, int64_t time)
 {
-	int i;
 	int64_t timeout = 0;
 
-	if (pressed) {
-		switch (d->op) {
-		case OP_LAYERM:
-		case OP_ONESHOTM:
-		case OP_TOGGLEM:
-		case OP_OVERLOADM:
-			execute_macro(kbd, dl, d->args[1].code, code);
-			break;
-		default:
-			break;
+	switch (d->op) {
+	case OP_CLEARM:
+		if (pressed)
+			clear(kbd);
+		[[fallthrough]];
+	case OP_LAYERM:
+	case OP_ONESHOTM:
+	case OP_TOGGLEM:
+	case OP_OVERLOADM: {
+		uint16_t macro_code = d->args[d->op != OP_CLEARM].code;
+		auto& macro = kbd->config.macros[macro_code & INT16_MAX];
+		if (macro.size == 1 && macro[0].type == MACRO_KEY_SEQ && !kbd->config.compat) {
+			// Try to behave like an OP_KEYSEQUENCE
+			// Otherwise the duck weirdly doesn't swim
+			// The only missing piece is OP_SWAPM mess (TODO)
+			uint16_t new_code = macro[0].id;
+			// Autokey
+			if (!new_code)
+				new_code = code;
+			do_keysequence(kbd, dl, pressed, time, new_code, macro[0].mods.mods, macro[0].mods.wildc);
+		} else if (pressed) {
+			// Proceed normally
+			execute_macro(kbd, dl, macro_code, code);
 		}
+		break;
+	}
+	default:
+		break;
 	}
 
 	auto auto_layer = [&]() -> int {
@@ -621,40 +655,14 @@ static int64_t process_descriptor(struct keyboard *kbd, uint16_t code, const str
 	switch (d->op) {
 		int idx;
 		struct descriptor *action;
-		uint8_t mods;
-		uint8_t wildcard;
 		uint16_t new_code;
 
 	case OP_KEYSEQUENCE:
 		new_code = d->args[0].code;
-		mods = d->args[1].mods;
-		wildcard = d->args[2].wildc;
-
-		// autokey
 		if (!new_code)
 			new_code = code;
 
-		if (pressed) {
-			/*
-			* Permit variations of the same key
-			* to be actuated next to each other
-			* E.G [/{
-			*/
-			if (kbd->keystate[new_code])
-				send_key(kbd, new_code, 0);
-
-			update_mods(kbd, dl, mods, wildcard | mods, new_code);
-
-			send_key(kbd, new_code, 1);
-			clear_oneshot(kbd, "key");
-		} else {
-			send_key(kbd, new_code, 0);
-			update_mods(kbd, -1, 0);
-		}
-
-		if (!mods || mods == (1 << MOD_SHIFT))
-			kbd->last_simple_key_time = time;
-
+		do_keysequence(kbd, dl, pressed, time, new_code, d->args[1].mods, d->args[2].wildc);
 		break;
 	case OP_SCROLL:
 		kbd->scroll.sensitivity = d->args[0].sensitivity;
@@ -678,7 +686,7 @@ static int64_t process_descriptor(struct keyboard *kbd, uint16_t code, const str
 				action = &kbd->config.descriptors[d->args[0].idx];
 
 			process_descriptor(kbd, code, action, dl, 1, time);
-			for (i = 0; i < CACHE_SIZE; i++) {
+			for (int i = 0; i < CACHE_SIZE; i++) {
 				if (code == kbd->cache[i].code) {
 					kbd->cache[i].d = *action;
 					break;
@@ -741,10 +749,6 @@ static int64_t process_descriptor(struct keyboard *kbd, uint16_t code, const str
 
 		break;
 	case OP_CLEARM:
-		if(pressed) {
-			clear(kbd);
-			execute_macro(kbd, dl, d->args[0].code, code);
-		}
 		break;
 	case OP_CLEAR:
 		if(pressed)
@@ -927,7 +931,7 @@ static int64_t process_descriptor(struct keyboard *kbd, uint16_t code, const str
 				execute_macro(kbd, dl, d->args[1].code, code);
 		} else if (d->op == OP_SWAPM) {
 			auto& macro = kbd->config.macros[d->args[1].code & INT16_MAX];
-			if (macro.size == 1 && macro[0].type == MACRO_KEYSEQUENCE) {
+			if (macro.size == 1 && macro[0].type <= MACRO_KEY_TAP) {
 				// Why is this necessary?
 				send_key(kbd, macro[0].id, 0);
 				update_mods(kbd, -1, 0);

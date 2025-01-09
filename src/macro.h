@@ -7,7 +7,8 @@
 #include <string_view>
 
 enum class macro_e : uint16_t {
-	MACRO_KEYSEQUENCE,
+	MACRO_KEY_SEQ = 0,
+	MACRO_KEY_TAP = 1,
 	MACRO_HOLD,
 	MACRO_RELEASE,
 	MACRO_UNICODE,
@@ -20,6 +21,7 @@ enum class macro_e : uint16_t {
 using enum macro_e;
 
 static_assert(static_cast<uint16_t>(MACRO_MAX) < 64);
+static_assert(MACRO_KEY_SEQ < MACRO_KEY_TAP);
 
 struct macro_entry {
 	enum macro_e type : 6;

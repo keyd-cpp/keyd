@@ -62,17 +62,17 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 							const char *shiftname = keycode_table[i].shifted_name;
 
 							if (name.size() == 1 && name[0] == tok[0]) {
-								ADD_ENTRY(MACRO_KEYSEQUENCE, i).mods = {};
+								ADD_ENTRY(MACRO_KEY_TAP, i).mods = {};
 								break;
 							}
 
 							if (shiftname && shiftname[0] == tok[0] && shiftname[1] == 0) {
-								ADD_ENTRY(MACRO_KEYSEQUENCE, i).mods = { .mods = (1 << MOD_SHIFT), .wildc = 0 };
+								ADD_ENTRY(MACRO_KEY_TAP, i).mods = { .mods = (1 << MOD_SHIFT), .wildc = 0 };
 								break;
 							}
 
 							if (altname && altname[0] == tok[0] && altname[1] == 0) {
-								ADD_ENTRY(MACRO_KEYSEQUENCE, i).mods = {};
+								ADD_ENTRY(MACRO_KEY_TAP, i).mods = {};
 								break;
 							}
 						}
@@ -108,7 +108,7 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 				return -1;
 			}
 			entries.emplace_back(macro_entry{
-				.type = MACRO_KEYSEQUENCE,
+				.type = MACRO_KEY_TAP,
 				.id = code,
 				.mods = { .mods = mods, .wildc = 0 },
 			});
@@ -142,12 +142,12 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 						const char *shiftname = keycode_table[i].shifted_name;
 
 						if (name.size() == 1 && name[0] == tok[0]) {
-							ADD_ENTRY(MACRO_KEYSEQUENCE, i).mods = {};
+							ADD_ENTRY(MACRO_KEY_TAP, i).mods = {};
 							break;
 						}
 
 						if (shiftname && shiftname[0] == tok[0] && shiftname[1] == 0) {
-							ADD_ENTRY(MACRO_KEYSEQUENCE, i).mods = { .mods = (1 << MOD_SHIFT), .wildc = 0 };
+							ADD_ENTRY(MACRO_KEY_TAP, i).mods = { .mods = (1 << MOD_SHIFT), .wildc = 0 };
 							break;
 						}
 					}
@@ -228,7 +228,8 @@ void macro_execute(void (*output)(uint16_t, uint8_t),
 			}
 
 			break;
-		case MACRO_KEYSEQUENCE:
+		case MACRO_KEY_SEQ:
+		case MACRO_KEY_TAP:
 			code = ent->id;
 			mods = ent->mods.mods;
 

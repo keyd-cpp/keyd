@@ -606,11 +606,13 @@ static int parse_macro_expression(std::string_view s, macro& macro, struct confi
 	*wildcard |= config->add_right_wildc;
 	if (res == 0) {
 		// Section modifiers are not active inside the macro itself
+		// Try to make a macro that is like a real keysequence
+		// Because it's written like one in this case
 		mods |= config->add_right_mods;
 		*wildcard |= mods;
 		macro.size = 1;
 		macro.entry = macro_entry{
-			.type = MACRO_KEYSEQUENCE,
+			.type = MACRO_KEY_SEQ,
 			.id = code,
 			.mods = { .mods = mods, .wildc = *wildcard },
 		};
