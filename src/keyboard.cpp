@@ -61,7 +61,7 @@ static struct cache_entry *cache_get(struct keyboard *kbd, uint16_t code)
 static void reset_keystate(struct keyboard *kbd)
 {
 	for (size_t i = 0; i < kbd->keystate.size(); i++) {
-		if (kbd->keystate[i] && !kbd->freezestate[i]) {
+		if (kbd->keystate[i]) {
 			kbd->output.send_key(i, 0);
 			kbd->keystate[i] = 0;
 		}
@@ -72,11 +72,6 @@ static void send_key(struct keyboard *kbd, uint16_t code, uint8_t pressed)
 {
 	if (code == KEYD_NOOP)
 		return;
-	if (kbd->freezestate[code]) {
-		if (pressed)
-			kbd->keystate[code] = 1;
-		return;
-	}
 	if (code >= kbd->keystate.size()) {
 		err("send_key(): invalid code %u", code);
 		return;

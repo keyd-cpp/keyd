@@ -56,7 +56,7 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 
 					if (chrsz == 1 && codepoint < 128) {
 						size_t i = 0;
-						for (i = 1; i < KEYD_KEY_COUNT; i++) {
+						for (i = 1; i < KEYD_ENTRY_COUNT; i++) {
 							const auto name = keycode_table[i].name();
 							const char* altname = keycode_table[i].alt_name;
 							const char *shiftname = keycode_table[i].shifted_name;
@@ -76,7 +76,7 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 								break;
 							}
 						}
-						if (i == KEYD_KEY_COUNT) {
+						if (i == KEYD_ENTRY_COUNT) {
 							break;
 						}
 					} else if ((xcode = unicode_lookup_index(codepoint)) > 0) {
@@ -137,7 +137,7 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 
 				if (chrsz == 1 && codepoint < 128) {
 					size_t i = 0;
-					for (i = 1; i < KEYD_KEY_COUNT; i++) {
+					for (i = 1; i < KEYD_ENTRY_COUNT; i++) {
 						const auto name = keycode_table[i].name();
 						const char *shiftname = keycode_table[i].shifted_name;
 
@@ -151,7 +151,7 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 							break;
 						}
 					}
-					if (i < KEYD_KEY_COUNT) {
+					if (i < KEYD_ENTRY_COUNT) {
 						continue;
 					}
 				} else if ((xcode = unicode_lookup_index(codepoint)) > 0) {

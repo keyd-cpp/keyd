@@ -157,7 +157,6 @@ struct keyboard {
 
 	std::bitset<KEYD_ENTRY_COUNT> capstate; // Input state
 	std::bitset<KEYD_ENTRY_COUNT> keystate; // Vkbd state
-	std::bitset<KEYD_ENTRY_COUNT> freezestate; // Vkbd temporary freezing
 
 	struct {
 		int x;

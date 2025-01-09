@@ -84,7 +84,7 @@ static int help(int, char *[])
 
 static int list_keys(int, char *[])
 {
-	for (size_t i = 0; i < KEYD_KEY_COUNT; i++) {
+	for (size_t i = 0; i < KEY_CNT; i++) {
 		const char *altname = keycode_table[i].alt_name;
 		const char *shiftedname = keycode_table[i].shifted_name;
 		const char *name = keycode_table[i].name().data();
@@ -99,7 +99,7 @@ static int list_keys(int, char *[])
 		printf("\n");
 	}
 
-	for (int i = KEYD_KEY_COUNT; i < KEYD_ENTRY_COUNT; i++) {
+	for (int i = KEY_CNT; i < KEYD_ENTRY_COUNT; i++) {
 		const char *altname = keycode_table[i].alt_name;
 		const char *name = keycode_table[i].b_name;
 

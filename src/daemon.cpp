@@ -1,6 +1,7 @@
 #include "keyd.h"
 #include "log.h"
 #include <memory>
+#include <bitset>
 #include <utility>
 
 #ifndef CONFIG_DIR
@@ -12,7 +13,7 @@ static std::shared_ptr<struct vkbd> vkbd;
 static std::vector<std::unique_ptr<keyboard>> configs;
 extern std::vector<device> device_table;
 
-static std::array<uint8_t, KEY_CNT> keystate{};
+static std::bitset<KEY_CNT> keystate{};
 
 struct listener
 {
@@ -70,18 +71,20 @@ static void cleanup()
 
 static void clear_vkbd()
 {
-	size_t i;
-
-	for (i = 0; i <= KEY_MAX; i++)
+	for (size_t i = 0; i < keystate.size(); i++) {
 		if (keystate[i]) {
 			vkbd_send_key(vkbd.get(), i, 0);
 			keystate[i] = 0;
 		}
+	}
+
+	vkbd_flush(vkbd.get());
 }
 
 static void send_key(uint16_t code, uint8_t state)
 {
-	keystate.at(code) = state;
+	if (code < keystate.size())
+		keystate[code] = state;
 	vkbd_send_key(vkbd.get(), code, state);
 }
 
@@ -390,6 +393,7 @@ static int input(char *buf, [[maybe_unused]] size_t sz, uint32_t timeout)
 			}
 		}
 		buf+=csz;
+		vkbd_flush(vkbd);
 
 		if (timeout)
 			usleep(timeout);
@@ -604,37 +608,25 @@ static int event_handler(struct event *ev)
 			default:
 				break;
 			case DEV_MOUSE_SCROLL:
-				if (active_kbd) {
-					kev.code = KEYD_NOOP;
+				while (active_kbd && (ev->devev->x || ev->devev->y)) {
 					kev.pressed = 1;
 					kev.timestamp = ev->timestamp;
 
-					// Check for overlapping with existing key events (not fake ones)
-					if (int32_t(ev->devev->y) > 0 && !kbd->keystate[KEY_SCROLLUP])
-						kev.code = KEY_SCROLLUP;
-					if (int32_t(ev->devev->y) < 0 && !kbd->keystate[KEY_SCROLLDOWN])
-						kev.code = KEY_SCROLLDOWN;
+					if (ev->devev->x > 0)
+						kev.code = KEYD_WHEELLEFT, ev->devev->x--;
+					else if (ev->devev->x < 0)
+						kev.code = KEYD_WHEELRIGHT, ev->devev->x++;
+					else if (ev->devev->y > 0)
+						kev.code = KEYD_WHEELUP, ev->devev->y--;
+					else if (ev->devev->y < 0)
+						kev.code = KEYD_WHEELDOWN, ev->devev->y++;
 
-					kbd->freezestate[kev.code] = 1;
 					kbd_process_events(kbd, &kev, 1);
 
-					// Observe key state, by default it just passes through
-					if (ev->devev->y && kev.code != KEYD_NOOP) {
-						if (!kbd->keystate[kev.code])
-							ev->devev->y = 0; // Suppress vertical scrolling
-					}
-
 					kev.pressed = 0;
+					// TODO: is it OK to just overwrite timeout?
 					timeout = kbd_process_events(kbd, &kev, 1);
-					kbd->freezestate[kev.code] = 0;
-					kbd->keystate[kev.code] = 0;
-
-					// Drop event if no scrolling occured
-					if (!ev->devev->y && !ev->devev->x)
-						break;
 				}
-
-				vkbd_mouse_scroll(vkbd, ev->devev->x, ev->devev->y);
 				break;
 			}
 		} else if (ev->dev->is_virtual && ev->devev->type == DEV_LED) {
@@ -680,6 +672,7 @@ static int event_handler(struct event *ev)
 		break;
 	}
 
+	vkbd_flush(vkbd);
 	return timeout;
 }
 

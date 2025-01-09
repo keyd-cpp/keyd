@@ -193,8 +193,8 @@ extern constexpr std::array<keycode_table_ent, KEYD_ENTRY_COUNT> keycode_table =
 	r[KEY_EXIT] = { "exit", NULL, NULL },
 	r[KEY_MOVE] = { "move", NULL, NULL },
 	r[KEY_EDIT] = { "edit", NULL, NULL },
-	r[KEY_SCROLLUP]	= { "scrollup", nullptr, nullptr },
-	r[KEY_SCROLLDOWN] = { "scrolldown", nullptr, nullptr },
+	r[KEY_SCROLLUP]	= { "key_scrollup", nullptr, nullptr },
+	r[KEY_SCROLLDOWN] = { "key_scrolldown", nullptr, nullptr },
 	r[KEY_KPLEFTPAREN] = { "kpleftparen", NULL, NULL },
 	r[KEY_KPRIGHTPAREN] = { "kprightparen", NULL, NULL },
 	r[KEY_NEW] = { "new", NULL, NULL },
@@ -267,9 +267,12 @@ extern constexpr std::array<keycode_table_ent, KEYD_ENTRY_COUNT> keycode_table =
 	r[KEYD_MOUSE_2] = { "mouse2", NULL, NULL },
 	r[KEYD_MOUSE_BACK] = { "mouseback", NULL, NULL },
 	r[KEYD_MOUSE_FORWARD] = { "mouseforward", NULL, NULL },
-	r[KEYD_NOOP] = { "noop", NULL, NULL };
 	r[KEY_FN] = { "fn", NULL, NULL },
 	r[KEY_ZOOM] = { "zoom", NULL, NULL },
+	r[KEYD_WHEELUP] = { "wheelup", "scrollup", nullptr },
+	r[KEYD_WHEELDOWN] = { "wheeldown", "scrolldown", nullptr },
+	r[KEYD_WHEELLEFT] = { "wheelleft", "scrollleft", nullptr },
+	r[KEYD_WHEELRIGHT] = { "wheelright", "scrollright", nullptr },
 	r[KEYD_FAKEMOD_ALT] = { "fakealt", nullptr, nullptr },
 	r[KEYD_FAKEMOD_SUPER] = { "fakemeta", "fakesuper", nullptr },
 	r[KEYD_FAKEMOD_SHIFT] = { "fakeshift", nullptr, nullptr },
@@ -278,6 +281,7 @@ extern constexpr std::array<keycode_table_ent, KEYD_ENTRY_COUNT> keycode_table =
 	r[KEYD_FAKEMOD_HYPER] = { "fakehyper", nullptr, nullptr },
 	r[KEYD_FAKEMOD_LEVEL5] = { "fakelevel5", nullptr, nullptr },
 	r[KEYD_FAKEMOD_NUMLOCK] = { "fakemod7", "fakenlock", nullptr },
+	r[KEYD_NOOP] = { "noop", NULL, NULL };
 	void();
 
 	for (size_t i = 1; i < KEYD_ENTRY_COUNT; i++) {
@@ -333,7 +337,7 @@ int parse_key_sequence(std::string_view s, uint16_t* codep, uint8_t *modsp, uint
 	if (wcsp)
 		*wcsp = wildcard;
 
-	for (size_t i = 0; i < KEYD_KEY_COUNT; i++) {
+	for (size_t i = 0; i < KEYD_ENTRY_COUNT; i++) {
 		const struct keycode_table_ent *ent = &keycode_table[i];
 
 		if (true) {

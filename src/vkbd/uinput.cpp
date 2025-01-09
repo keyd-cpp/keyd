@@ -10,7 +10,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <time.h>
-#include <errno.h>
+#include <utility>
 
 #ifdef __FreeBSD__
 	#include <dev/evdev/uinput.h>
@@ -20,14 +20,15 @@
 	#include <linux/input-event-codes.h>
 #endif
 
-#define REPEAT_INTERVAL 40
-#define REPEAT_TIMEOUT 200
-
 #include "../keyd.h"
 
 struct vkbd {
-	int fd;
-	int pfd;
+	int fd = -1;
+	int pfd = -1;
+
+	// Buffered wheel events
+	int vwheel_buf = 0;
+	int hwheel_buf = 0;
 
 	vkbd() = default;
 	vkbd(const vkbd&) = delete;
@@ -36,6 +37,29 @@ struct vkbd {
 	{
 		close(fd);
 		close(pfd);
+	}
+
+	void send_kbd_event(int fd_type, uint16_t type, uint16_t code, int32_t value)
+	{
+		struct input_event ev[2];
+		ev[0] = {
+			.time = {},
+			.type = type,
+			.code = code,
+			.value = value,
+		};
+		ev[1] = {
+			.time = {},
+			.type = EV_SYN,
+			.code = 0,
+			.value = 0,
+		};
+
+		// 0 = kbd, 1 = ptr, 2+ unimplemented
+		if (fd_type == 0)
+			xwrite(this->fd, ev, sizeof(ev));
+		else if (fd_type == 1)
+			xwrite(this->pfd, ev, sizeof(ev));
 	}
 };
 
@@ -165,18 +189,9 @@ static int create_virtual_pointer(const char *name)
 	return fd;
 }
 
-static void write_key_event(const struct vkbd *vkbd, uint16_t code, int state)
+static void write_key_event(struct vkbd *vkbd, uint16_t code, int state)
 {
-	struct input_event ev;
-	int fd;
-	int is_btn;
-
-	fd = vkbd->fd;
-
-	ev.type = EV_KEY;
-	ev.code = code;
-
-	is_btn = 1;
+	int is_btn = 1;
 	switch (code) {
 		case KEYD_LEFT_MOUSE:
 		case KEYD_MIDDLE_MOUSE:
@@ -191,14 +206,7 @@ static void write_key_event(const struct vkbd *vkbd, uint16_t code, int state)
 			break;
 	}
 
-	/*
-	 * Send all buttons through the virtual pointer
-	 * to prevent X from identifying the virtual
-	 * keyboard as a mouse.
-	 */
 	if (is_btn) {
-		fd = vkbd->pfd;
-
 		/*
 		 * Give key events preceding a mouse click
 		 * a chance to propagate to avoid event
@@ -212,19 +220,7 @@ static void write_key_event(const struct vkbd *vkbd, uint16_t code, int state)
 		usleep(1000);
 	}
 
-	ev.value = state;
-
-	ev.time.tv_sec = 0;
-	ev.time.tv_usec = 0;
-
-	xwrite(fd, &ev, sizeof(ev));
-
-	ev.type = EV_SYN;
-	ev.code = 0;
-	ev.value = 0;
-
-
-	xwrite(fd, &ev, sizeof(ev));
+	vkbd->send_kbd_event(is_btn, EV_KEY, code, state);
 }
 
 std::shared_ptr<vkbd> vkbd_init(const char *)
@@ -236,106 +232,48 @@ std::shared_ptr<vkbd> vkbd_init(const char *)
 	return vkbd;
 }
 
-void vkbd_mouse_move(const struct vkbd *vkbd, int x, int y)
+void vkbd_mouse_move(struct vkbd *vkbd, int x, int y)
 {
-	struct input_event ev;
-
-	if (x) {
-		ev.type = EV_REL;
-		ev.code = REL_X;
-		ev.value = x;
-
-		ev.time.tv_sec = 0;
-		ev.time.tv_usec = 0;
-
-		xwrite(vkbd->pfd, &ev, sizeof(ev));
-	}
-
-	if (y) {
-		ev.type = EV_REL;
-		ev.code = REL_Y;
-		ev.value = y;
-
-		ev.time.tv_sec = 0;
-		ev.time.tv_usec = 0;
-
-		xwrite(vkbd->pfd, &ev, sizeof(ev));
-	}
-
-	ev.type = EV_SYN;
-	ev.code = 0;
-	ev.value = 0;
-
-	xwrite(vkbd->pfd, &ev, sizeof(ev));
+	if (x)
+		vkbd->send_kbd_event(1, EV_REL, REL_X, x);
+	if (y)
+		vkbd->send_kbd_event(1, EV_REL, REL_Y, y);
 }
 
-void vkbd_mouse_scroll(const struct vkbd *vkbd, int x, int y)
+void vkbd_mouse_scroll(struct vkbd* vkbd, int x, int y)
 {
-	struct input_event ev;
-
-	ev.type = EV_REL;
-	ev.code = REL_WHEEL;
-	ev.value = y;
-
-	ev.time.tv_sec = 0;
-	ev.time.tv_usec = 0;
-
-	xwrite(vkbd->pfd, &ev, sizeof(ev));
-
-	ev.type = EV_REL;
-	ev.code = REL_HWHEEL;
-	ev.value = x;
-
-	ev.time.tv_sec = 0;
-	ev.time.tv_usec = 0;
-
-	xwrite(vkbd->pfd, &ev, sizeof(ev));
-
-	ev.type = EV_SYN;
-	ev.code = 0;
-	ev.value = 0;
-
-	xwrite(vkbd->pfd, &ev, sizeof(ev));
+	vkbd->hwheel_buf += x;
+	vkbd->vwheel_buf += y;
 }
 
-void vkbd_mouse_move_abs(const struct vkbd *vkbd, int x, int y)
+void vkbd_mouse_move_abs(struct vkbd* vkbd, int x, int y)
 {
-	struct input_event ev;
-
-	if (x) {
-		ev.type = EV_ABS;
-		ev.code = ABS_X;
-		ev.value = x;
-
-		ev.time.tv_sec = 0;
-		ev.time.tv_usec = 0;
-
-		xwrite(vkbd->pfd, &ev, sizeof(ev));
-	}
-
-	if (y) {
-		ev.type = EV_ABS;
-		ev.code = ABS_Y;
-		ev.value = y;
-
-		ev.time.tv_sec = 0;
-		ev.time.tv_usec = 0;
-
-		xwrite(vkbd->pfd, &ev, sizeof(ev));
-	}
-
-	ev.type = EV_SYN;
-	ev.code = 0;
-	ev.value = 0;
-
-	xwrite(vkbd->pfd, &ev, sizeof(ev));
+	if (x)
+		vkbd->send_kbd_event(1, EV_ABS, ABS_X, x);
+	if (y)
+		vkbd->send_kbd_event(1, EV_ABS, ABS_Y, y);
 }
 
-void vkbd_send_key(const struct vkbd *vkbd, uint16_t code, int state)
+void vkbd_send_key(struct vkbd* vkbd, uint16_t code, int state)
 {
 	dbg("output %s %s", KEY_NAME(code), state == 1 ? "down" : "up");
+
+	if (KEYD_WHEELEVENT(code) && state) {
+		// Buffer scroll events, a bit ugly but I hate to repeat constants
+		(code & 2 ? vkbd->hwheel_buf : vkbd->vwheel_buf) += (code & 1 ? -1 : 1);
+		return;
+	}
 
 	if (code > KEY_MAX)
 		return;
 	write_key_event(vkbd, code, state);
+}
+
+void vkbd_flush(struct vkbd* vkbd)
+{
+	// TODO: implement key buffering as well
+	if (int y = std::exchange(vkbd->vwheel_buf, 0))
+		vkbd->send_kbd_event(1, EV_REL, REL_WHEEL, y);
+	if (int x = std::exchange(vkbd->hwheel_buf, 0))
+		vkbd->send_kbd_event(1, EV_REL, REL_HWHEEL, x);
 }

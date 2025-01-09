@@ -287,7 +287,6 @@ struct modifier {
 
 /* Deviations */
 
-#define  KEYD_NOOP                             195
 #define  KEYD_CHORD_1                  197
 #define  KEYD_CHORD_2                  198
 #define  KEYD_CHORD_MAX                        199
@@ -308,6 +307,12 @@ struct modifier {
 // #define KEYD_CHORD_2			0x303
 // #define KEYD_CHORD_MAX			0x304
 
+#define KEYD_WHEELUP			0x300
+#define KEYD_WHEELDOWN			0x301
+#define KEYD_WHEELLEFT			0x302
+#define KEYD_WHEELRIGHT			0x303
+#define KEYD_WHEELEVENT(x)		((x & -4) == KEYD_WHEELUP)
+
 #define KEYD_FAKEMOD			900
 #define KEYD_FAKEMOD_ALT		900
 #define KEYD_FAKEMOD_SUPER		901
@@ -318,11 +323,12 @@ struct modifier {
 #define KEYD_FAKEMOD_LEVEL5		906
 #define KEYD_FAKEMOD_NUMLOCK	907
 
-#define KEY_NAME(code) (size_t(code) < KEYD_KEY_COUNT ? keycode_table[code].name().data() : "UNKNOWN")
+#define KEYD_NOOP 				(KEYD_ENTRY_COUNT-1)
+
+#define KEY_NAME(code) (size_t(code) < KEYD_ENTRY_COUNT ? keycode_table[code].name().data() : "UNKNOWN")
 
 int parse_key_sequence(std::string_view, uint16_t* code, uint8_t *mods, uint8_t* wildcards = nullptr);
 
-#define KEYD_KEY_COUNT				0x300
 #define KEYD_ENTRY_COUNT			1000
 
 extern const std::array<keycode_table_ent, KEYD_ENTRY_COUNT> keycode_table;

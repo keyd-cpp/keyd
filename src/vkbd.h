@@ -13,9 +13,10 @@ struct vkbd;
 
 std::shared_ptr<vkbd> vkbd_init(const char *name);
 
-void vkbd_mouse_move(const struct vkbd *vkbd, int x, int y);
-void vkbd_mouse_move_abs(const struct vkbd *vkbd, int x, int y);
-void vkbd_mouse_scroll(const struct vkbd *vkbd, int x, int y);
+void vkbd_mouse_move(struct vkbd* vkbd, int x, int y);
+void vkbd_mouse_move_abs(struct vkbd* vkbd, int x, int y);
+void vkbd_mouse_scroll(struct vkbd* vkbd, int x, int y);
 
-void vkbd_send_key(const struct vkbd *vkbd, uint16_t code, int state);
+void vkbd_send_key(struct vkbd* vkbd, uint16_t code, int state);
+void vkbd_flush(struct vkbd* vkbd);
 #endif
