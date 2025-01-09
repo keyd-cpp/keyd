@@ -33,7 +33,7 @@ struct keycode_table_ent {
 	char key_num[8]{'k', 'e', 'y', '_', '0', '0', '0'};
 
 	constexpr std::string_view name() const {
-		return b_name ? b_name : key_num;
+		return b_name ? b_name : std::string_view(key_num, 7);
 	}
 };
 

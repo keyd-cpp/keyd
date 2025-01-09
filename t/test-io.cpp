@@ -275,7 +275,7 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	if (config_parse(&kbd->config, argv[1])) {
+	if (!config_parse(&kbd->config, argv[1])) {
 		printf("Failed to parse config %s\n", argv[1]);
 		return -1;
 	}

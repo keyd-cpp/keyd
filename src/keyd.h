@@ -24,6 +24,7 @@
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/mman.h>
 #include <sys/un.h>
 #include <termios.h>
 #include <getopt.h>
@@ -50,6 +51,7 @@
 
 #define ARRAY_SIZE(x) (int)(sizeof(x)/sizeof(x[0]))
 #define VKBD_NAME "keyd virtual "
+#define C_SPACES " \f\n\r\t\v"
 
 enum class event_type : signed char {
 	EV_DEV_ADD,
@@ -152,6 +154,66 @@ struct file_reader
 private:
 	int fd;
 	unsigned reserve;
+};
+
+struct file_mapper
+{
+	explicit file_mapper(int fd)
+	{
+		if (fd < 0) {
+			perror("fd");
+			return;
+		}
+
+		struct stat _stat;
+		if (fstat(fd, &_stat) < 0) {
+			perror("fstat");
+			close(fd);
+			return;
+		}
+
+		if (_stat.st_size == 0 || _stat.st_size > UINT32_MAX) {
+			close(fd);
+			return;
+		}
+
+		this->size = _stat.st_size;
+		this->ptr = ::mmap(nullptr, this->size + size_t(1), PROT_READ, MAP_PRIVATE | MAP_SHARED, fd, 0);
+		if (intptr_t(this->ptr) == -1) {
+			perror("mmap");
+			close(fd);
+			return;
+		}
+
+		this->fd = fd;
+	}
+
+	explicit operator bool() const
+	{
+		return this->fd >= 0 && this->ptr;
+	}
+
+	std::string_view view() const
+	{
+		if (this->fd >= 0 && this->ptr)
+			return {static_cast<char*>(this->ptr), this->size};
+		return {};
+	}
+
+	file_mapper(const file_mapper&) = delete;
+	file_mapper& operator=(const file_mapper&) = delete;
+
+	~file_mapper()
+	{
+		if (this->fd >= 0) {
+			::munmap(this->ptr, this->size + size_t(1));
+			close(this->fd);
+		}
+	}
+private:
+	int fd = -1;
+	unsigned size = 0;
+	void* ptr = nullptr;
 };
 
 #endif

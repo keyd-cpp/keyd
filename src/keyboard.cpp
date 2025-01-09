@@ -73,7 +73,7 @@ static void send_key(struct keyboard *kbd, uint16_t code, uint8_t pressed)
 	if (code == KEYD_NOOP)
 		return;
 	if (code >= kbd->keystate.size()) {
-		err("send_key(): invalid code %u", code);
+		keyd_log("send_key(): invalid code %u", code);
 		return;
 	}
 
@@ -940,7 +940,7 @@ static int64_t process_descriptor(struct keyboard *kbd, uint16_t code, const str
 
 		break;
 	default:
-		err("Unknown OP code: %u", +static_cast<uint16_t>(d->op));
+		keyd_log("Unknown OP code: %u", +static_cast<uint16_t>(d->op));
 		return 0;
 	}
 
@@ -1383,7 +1383,12 @@ bool kbd_eval(struct keyboard* kbd, std::string_view exp)
 			layer.keymap = {};
 		}
 	} else {
-		if (int idx = config_add_entry(&kbd->config, exp); idx >= 0) {
+		auto section = exp.substr(0, exp.find_first_of('.'));
+		if (section.size() == exp.size())
+			section = {};
+		else
+			exp.remove_prefix(section.size() + 1);
+		if (int idx = config_add_entry(&kbd->config, section, exp); idx >= 0) {
 			kbd->config.layers[idx].keymap.sort();
 			kbd->update_layer_state();
 			return true;

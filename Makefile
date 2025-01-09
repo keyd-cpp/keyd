@@ -1,5 +1,5 @@
 .PHONY: all clean install uninstall debug man compose test-harness
-VERSION=3.0.2-beta
+VERSION=3.0.3-beta
 COMMIT=$(shell git describe --no-match --always --abbrev=7 --dirty)
 VKBD=uinput
 PREFIX?=/usr/local
@@ -130,7 +130,6 @@ test-io:
 		src/macro.cpp \
 		src/config.cpp \
 		src/log.cpp \
-		src/ini.cpp \
 		src/keys.cpp  \
 		src/unicode.cpp && \
 	./bin/test-io t/test.conf t/*.t

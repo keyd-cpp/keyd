@@ -241,7 +241,7 @@ void device_scan(std::vector<device>& devices)
 	};
 
 	while (struct dirent* ent = readdir(dh)) {
-		if (ent->d_type != DT_DIR && !strncmp(ent->d_name, "event", 5)) {
+		if (ent->d_type != DT_DIR && !memcmp(ent->d_name, "event", 5)) {
 			struct device_worker *w = &workers[n % std::size(workers)];
 			if (n >= std::size(workers)) {
 				join(n);

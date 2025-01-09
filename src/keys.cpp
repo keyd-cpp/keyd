@@ -5,6 +5,7 @@
  */
 #include <stdint.h>
 #include <string.h>
+#include "keyd.h"
 #include "keys.h"
 #include <array>
 
@@ -337,6 +338,11 @@ int parse_key_sequence(std::string_view s, uint16_t* codep, uint8_t *modsp, uint
 	if (wcsp)
 		*wcsp = wildcard;
 
+	s = c;
+	c = c.substr(0, c.find_first_of(C_SPACES "-=+"));
+	if (s.starts_with('-') || s.starts_with('=') || s.starts_with('+'))
+		c = s.substr(0, 1);
+
 	for (size_t i = 0; i < KEYD_ENTRY_COUNT; i++) {
 		const struct keycode_table_ent *ent = &keycode_table[i];
 
@@ -351,8 +357,8 @@ int parse_key_sequence(std::string_view s, uint16_t* codep, uint8_t *modsp, uint
 				if (codep)
 					*codep = i;
 
-				return 0;
-			} else if (ent->name() == c || ent->key_num == c || (ent->alt_name && ent->alt_name == c)) {
+				return s.size() - c.size();
+			} else if (ent->name() == c || std::string_view(ent->key_num, 7) == c || (ent->alt_name && ent->alt_name == c)) {
 
 				if (modsp)
 					*modsp = mods;
@@ -360,11 +366,11 @@ int parse_key_sequence(std::string_view s, uint16_t* codep, uint8_t *modsp, uint
 				if (codep)
 					*codep = i;
 
-				return 0;
+				return s.size() - c.size();
 			}
 		}
 	}
 
 	// Return number of remaining bytes for partial success
-	return c.size();
+	return s.size();
 }

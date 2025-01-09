@@ -191,7 +191,7 @@ static void load_configs()
 			keyd_log("CONFIG: parsing b{%s}\n", name.c_str());
 
 			auto kbd = std::make_unique<keyboard>();
-			if (!config_parse(&kbd->config, name.c_str())) {
+			if (config_parse(&kbd->config, name.c_str())) {
 				kbd->output = {
 					.send_key = send_key,
 					.on_layer_change = on_layer_change,
@@ -282,19 +282,17 @@ static void reload(std::shared_ptr<env_pack> env)
 		else
 			buf.clear();
 		buf += "keyd/bindings.conf";
-		buf = file_reader(open(buf.c_str(), O_RDONLY), 4096, [&]{
+		file_mapper file(open(buf.c_str(), O_RDONLY));
+		if (!file) {
 			keyd_log("Unable to open %s\n", buf.c_str());
-			perror("open");
-		});
-
-		if (buf.empty())
 			return;
+		}
 
 		for (auto& kbd : configs) {
 			kbd->config.cfg_use_uid = env->uid;
 			kbd->config.cfg_use_gid = env->gid;
 			kbd->config.env = env;
-			for (auto str : split_char<'\n'>(buf)) {
+			for (auto str : split_char<'\n'>(file.view())) {
 				if (str.empty())
 					continue;
 				if (!kbd_eval(kbd.get(), str))

@@ -142,7 +142,7 @@ int evloop(int (*event_handler) (struct event *ev))
 
 			while (devmon_read_device(monfd, &dev) == 0) {
 				if (device_table.size() >= std::size(pfds) - 2) {
-					err("Too many devices, some of them will be ignored.");
+					keyd_log("Too many devices, some of them will be ignored.");
 				}
 				device_table.emplace_back(std::move(dev));
 

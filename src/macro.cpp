@@ -9,15 +9,13 @@
 
 int macro_parse(std::string_view s, macro& macro, struct config* config)
 {
-	constexpr std::string_view spaces = " \t\r\n";
-
 	std::vector<macro_entry> entries;
 
 	#define ADD_ENTRY(t, d) entries.emplace_back(macro_entry{.type = t, .id = static_cast<uint16_t>(d), .code = static_cast<uint16_t>(d)})
 
 	std::string buf;
-	while (!(s = s.substr(std::min(s.size(), s.find_first_not_of(spaces)))).empty()) {
-		std::string_view tok = s.substr(0, s.find_first_of(spaces));
+	while (!(s = s.substr(std::min(s.size(), s.find_first_not_of(C_SPACES)))).empty()) {
+		std::string_view tok = s.substr(0, s.find_first_of(C_SPACES));
 		const bool is_txt = tok.starts_with("type(") || tok.starts_with("text(") || tok.starts_with("txt(") || tok.starts_with("t(");
 		const bool is_cmd = tok.starts_with("cmd(") || tok.starts_with("command(");
 		if (is_txt || is_cmd) {

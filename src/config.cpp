@@ -18,7 +18,6 @@
 #include <libgen.h>
 
 #include "keyd.h"
-#include "ini.h"
 #include "keys.h"
 #include "log.h"
 #include "strutil.h"
@@ -27,6 +26,8 @@
 #include <string>
 #include <string_view>
 #include <algorithm>
+#include <numeric>
+#include <charconv>
 
 #ifndef DATA_DIR
 #define DATA_DIR
@@ -196,16 +197,18 @@ static std::string resolve_include_path(const char *path, std::string_view inclu
 	return resolved_path;
 }
 
-static std::string read_file(const char *path, size_t recursion_depth = 0)
+// Callback: path, line number, line
+static bool read_ini_file(const char* path, size_t max_depth, auto&& cb)
 {
-	std::string buf;
+	file_mapper file(open(path, O_RDONLY));
+	if (!file) {
+		keyd_log("Unable to open %s\n", path);
+		return false;
+	}
 
-	std::string file = file_reader(open(path, O_RDONLY), 512, [&] {
-		err("failed to open %s", path);
-		perror("open");
-	});
+	std::size_t nline = 0;
 
-	for (auto line : split_char<'\n'>(file)) {
+	for (auto line : split_char<'\n'>(file.view())) {
 		if (line.starts_with("include ") || line.starts_with("include\t")) {
 			auto include_path = line.substr(8);
 
@@ -215,31 +218,68 @@ static std::string read_file(const char *path, size_t recursion_depth = 0)
 				continue;
 			}
 
-			if (recursion_depth >= 10) {
+			if (!max_depth) {
 				warn("include depth too big or cyclic: %.*s", (int)include_path.size(), include_path.data());
 				continue;
 			}
 
-			buf += read_file(resolved_path.c_str(), recursion_depth + 1);
+			read_ini_file(resolved_path.c_str(), max_depth - 1, std::move(cb));
 		} else {
-			buf.append(line);
-			buf += '\n';
+			// Filter spaces and comments
+			line = line.substr(std::min(line.size(), line.find_first_not_of(C_SPACES)));
+			line = line.substr(0, line.find_last_not_of(C_SPACES) + 1);
+			if (!line.empty() && !line.starts_with('#'))
+				cb(path, nline, line);
 		}
+		nline++;
 	}
 
-	return buf;
+	return true;
 }
 
+// Return value string from ' = value' (with key already parsed)
+static std::string_view get_ini_value(std::string_view s)
+{
+	s = s.substr(std::min(s.size(), s.find_first_not_of(C_SPACES)));
+	if (!s.starts_with('='))
+		return {};
+	s.remove_prefix(1);
+	return s.substr(std::min(s.size(), s.find_first_not_of(C_SPACES)));
+}
+
+template <typename T>
+bool parse_int(std::string_view name, T& value, std::string_view s,
+	std::type_identity_t<T> min = std::numeric_limits<T>::min(),
+	std::type_identity_t<T> max = std::numeric_limits<T>::max())
+{
+	if (s.starts_with(name))
+		s.remove_prefix(name.size());
+	else
+		return false;
+	s = get_ini_value(s);
+	if (s.empty())
+		return false;
+	T tmp{};
+	auto r = std::from_chars(s.data(), s.data() + s.size(), tmp);
+	// String tail is not checked as a form of backward compat
+	if (r.ec != std::errc())
+		return false;
+	if (tmp < min || tmp > max)
+		return false;
+	value = tmp;
+	return true;
+}
 
 /* Return descriptor with keycode and parse mods (partial success possible). */
-static descriptor lookup_keycode(std::string_view name)
+static std::pair<descriptor, std::string_view> lookup_keycode(std::string_view s)
 {
 	descriptor r{};
-	if (auto res = parse_key_sequence(name, &r.args[0].code, &r.args[1].mods, &r.args[2].wildc); res < 0) {
+	if (auto res = parse_key_sequence(s, &r.args[0].code, &r.args[1].mods, &r.args[2].wildc); res < 0) {
 		r.op = OP_NULL;
-		return r;
+		return {r, {}};
 	} else {
-		name = name.substr(name.size() - res);
+		s = s.substr(s.size() - res);
+		std::string_view name = s.substr(0, s.find_first_of(C_SPACES "="));
 		r.op = OP_KEYSEQUENCE;
 		static constexpr auto add = KEYD_ENTRY_COUNT - KEYD_FAKEMOD;
 		if (name == "control" || name == "ctrl")
@@ -260,12 +300,14 @@ static descriptor lookup_keycode(std::string_view name)
 			r.id = KEYD_FAKEMOD_NLOCK + add;
 		else
 			r.id = r.args[0].code;
+		if (r.id >= KEYD_ENTRY_COUNT)
+			s.remove_prefix(name.size());
 		r.mods = r.args[1].mods;
 		r.wildcard = r.args[2].wildc;
 		// Allow partial failure with zero keycode
 		if (r.id == 0)
 			r.op = OP_NULL;
-		return r;
+		return {r, s};
 	}
 }
 
@@ -310,27 +352,21 @@ static uint8_t get_mods(const struct config* cfg, const struct layer* layer)
 	return r;
 }
 
-/*
- * Consumes a string of the form `[<layer>.]<key> = <descriptor>` and adds the
- * mapping to the corresponding layer in the config.
- */
+static int parse_descriptor(std::string_view s, struct descriptor *d, struct config *config);
 
-static int set_layer_entry(const struct config *config,
-			   struct layer *layer, char *key,
-			   const struct descriptor *d)
+static bool set_layer_entry(struct config *config, int16_t idx, std::string_view s)
 {
-	if (strchr(key, '+')) {
-		//TODO: Handle aliases
-		//TODO: what do to with modifiers?
-		char *tok;
-		struct descriptor *ld;
-		decltype(chord::keys) keys{};
-		size_t n = 0;
+	struct chord chord{};
+	size_t n = 0;
 
-		for (tok = strtok(key, "+"); tok; tok = strtok(NULL, "+")) {
-			descriptor desc = lookup_keycode(tok);
+	struct descriptor dd{};
+	struct descriptor* d = &dd;
+
+	while (true) {
+		auto [desc, next] = lookup_keycode(s);
+		if (n || next.starts_with('+')) {
 			if (!desc || desc.mods || desc.wildcard) {
-				err("%s is not a valid key", tok);
+				err("%.*s is not a valid chord key", (int)s.size(), s.data());
 				return -1;
 			}
 
@@ -342,31 +378,49 @@ static int set_layer_entry(const struct config *config,
 			}
 
 			if (desc.id >= KEYD_ENTRY_COUNT) {
-				err("chord key %s+ is a modifier, did you mean to use %c-key combo?", tok, mod_ids.at(desc.id - KEYD_ENTRY_COUNT));
+				err("chord key %.*s+ is a modifier, did you mean to use %c-key combo?", (int)s.size(), s.data(), mod_ids.at(desc.id - KEYD_ENTRY_COUNT));
 				return -1;
 			}
 
-			if (n >= ARRAY_SIZE(keys)) {
+			if (n >= ARRAY_SIZE(chord.keys)) {
 				err("chords cannot contain more than %ld keys", n);
 				return -1;
 			}
 
-			keys[n++] = desc.id;
+			chord.keys[n++] = desc.id;
+
+			if (next.starts_with('+')) {
+				s = next;
+				s.remove_prefix(1);
+				continue;
+			}
 		}
 
+		if (n) {
+			if (parse_descriptor(get_ini_value(next), d, config) < 0)
+				return false;
 
-		if ((ld = layer_lookup_chord(layer, keys, n))) {
-			*ld = *d;
-		} else {
-			layer->chords.emplace_back() = {keys, *d};
+			if (!(d = layer_lookup_chord(&config->layers[idx], chord.keys, n))) {
+				config->layers[idx].chords.emplace_back(chord).d = dd;
+			} else {
+				*d = dd;
+			}
+			return true;
 		}
-	} else {
-		std::string_view expr = key;
-		expr.remove_prefix(expr.find_last_of("-*") + 1);
-		auto found = config->aliases.find(expr);
+
+		// Get alias name
+		std::string_view aname = next.substr(0, next.find_first_of(C_SPACES "="));
+		next.remove_prefix(aname.size());
+
+		if (parse_descriptor(get_ini_value(next), d, config) < 0)
+			return false;
+
+		// parse_descriptor can create layers, so use idx
+		struct layer* layer = &config->layers[idx];
+		auto found = config->aliases.find(aname);
 		if (found != config->aliases.end()) {
-			// Lookup mods
-			descriptor aux = lookup_keycode(key);
+			// Lookup mods, use key descriptor as aux, and desc as value descriptor
+			descriptor aux = desc;
 			descriptor desc = *d;
 			for (const auto& alias : found->second) {
 				if (alias.op != OP_KEYSEQUENCE)
@@ -389,10 +443,9 @@ static int set_layer_entry(const struct config *config,
 				}
 			}
 		} else {
-			descriptor desc = lookup_keycode(key);
 			if (!desc) {
-				err("%s is not a valid key or alias", key);
-				return -1;
+				err("%.*s is not a valid key or alias (%.*s)", (int)s.size(), s.data(), (int)next.size(), next.data());
+				return false;
 			}
 			desc.op = d->op;
 			desc.args = d->args;
@@ -411,9 +464,11 @@ static int set_layer_entry(const struct config *config,
 				layer->keymap.set(desc);
 			}
 		}
+
+		break;
 	}
 
-	return 0;
+	return true;
 }
 
 static std::pair<std::string, uint16_t> layer_composition(struct config* config, std::string_view str)
@@ -474,7 +529,7 @@ static std::pair<std::string, uint16_t> layer_composition(struct config* config,
  */
 static int config_access_layer(struct config *config, std::string_view name, bool singular = false)
 {
-	if (name.empty()) [[unlikely]]
+	if (name.empty() || name.find_first_of('.') + 1) [[unlikely]]
 		return -1;
 	// [+] = shortcut for [main]
 	if (name.find_first_not_of('+') == size_t(-1))
@@ -640,9 +695,7 @@ static int parse_macro_expression(std::string_view s, macro& macro, struct confi
 	return macro_parse(s, macro, config) == 0 ? 0 : 1;
 }
 
-static int parse_descriptor(char *s,
-			    struct descriptor *d,
-			    struct config *config)
+static int parse_descriptor(std::string_view s, struct descriptor *d, struct config *config)
 {
 	char *fn = NULL;
 	char *args[5];
@@ -654,7 +707,7 @@ static int parse_descriptor(char *s,
 	::macro macro;
 	std::string cmd;
 
-	if (!s || !s[0]) {
+	if (s.empty()) {
 		d->op = OP_NULL;
 		return 0;
 	}
@@ -681,12 +734,10 @@ static int parse_descriptor(char *s,
 		config->macros.emplace_back(std::move(macro));
 
 		return 0;
-	} else if (!parse_fn(s, &fn, args, &nargs)) {
+	} else if (std::string sbuf{s}, buf; !parse_fn(sbuf.data(), &fn, args, &nargs)) {
 		int i;
 
 		if (!strcmp(fn, "lettermod")) {
-			std::string buf;
-
 			if (nargs != 4) {
 				err("%s requires 4 arguments", fn);
 				return -1;
@@ -798,59 +849,55 @@ static int parse_descriptor(char *s,
 		}
 	}
 
-	err("invalid key or action: %s", s);
+	err("invalid key or action: %.*s", (int)s.size(), s.data());
 	return -1;
 }
 
-static void parse_global_section(struct config *config, struct ini_section *section)
+static void parse_global_section(struct config* config, const char* file, size_t ln, std::string_view s)
 {
-	for (size_t i = 0; i < section->entries.size(); i++) {
-		struct ini_entry *ent = &section->entries[i];
-
-		if (!strcmp(ent->key, "macro_timeout"))
-			config->macro_timeout = atoi(ent->val);
-		else if (!strcmp(ent->key, "macro_sequence_timeout"))
-			config->macro_sequence_timeout = atoi(ent->val);
-		else if (!strcmp(ent->key, "disable_modifier_guard"))
-			config->disable_modifier_guard = atoi(ent->val);
-		else if (!strcmp(ent->key, "oneshot_timeout"))
-			config->oneshot_timeout = atoi(ent->val);
-		else if (!strcmp(ent->key, "chord_hold_timeout"))
-			config->chord_hold_timeout = atoi(ent->val);
-		else if (!strcmp(ent->key, "chord_timeout"))
-			config->chord_interkey_timeout = atoi(ent->val);
-		else if (!strcmp(ent->key, "default_layout"))
-			config->default_layout = ent->val;
-		else if (!strcmp(ent->key, "macro_repeat_timeout"))
-			config->macro_repeat_timeout = atoi(ent->val);
-		else if (!strcmp(ent->key, "layer_indicator"))
-			config->layer_indicator = atoi(ent->val);
-		else if (!strcmp(ent->key, "overload_tap_timeout"))
-			config->overload_tap_timeout = atoi(ent->val);
-		else
-			warn("line %zd: %s is not a valid global option", ent->lnum, ent->key);
-	}
+	if (parse_int("macro_timeout", config->macro_timeout, s, 0))
+		return;
+	else if (parse_int("macro_sequence_timeout", config->macro_sequence_timeout, s, 0))
+		return;
+	else if (parse_int("disable_modifier_guard", config->disable_modifier_guard, s, 0, 1))
+		return;
+	else if (parse_int("oneshot_timeout", config->oneshot_timeout, s, 0))
+		return;
+	else if (parse_int("chord_hold_timeout", config->chord_hold_timeout, s, 0))
+		return;
+	else if (parse_int("chord_timeout", config->chord_interkey_timeout, s, 0))
+		return;
+	else if (s.starts_with("default_layout") && s.find_first_of(C_SPACES "=") == 14)
+		return config->default_layout = s.substr(s.find_last_of(C_SPACES "=") + 1), void(); // TODO
+	else if (parse_int("macro_repeat_timeout", config->macro_repeat_timeout, s, 0))
+		return;
+	else if (parse_int("layer_indicator", config->layer_indicator, s, 0, 15))
+		return;
+	else if (parse_int("overload_tap_timeout", config->overload_tap_timeout, s, 0))
+		return;
+	else
+		warn("[%s] line %zd: %.*s is not a valid global option", file, ln, (int)s.size(), s.data());
 }
 
-static void parse_id_section(struct config *config, struct ini_section *section)
+static void parse_id_section(struct config* config, const char* file, size_t ln, std::string_view s)
 {
-	for (size_t i = 0; i < section->entries.size(); i++) {
+	if (!s.empty()) {
 		uint16_t product, vendor;
-
-		struct ini_entry *ent = &section->entries[i];
-		std::string_view s = ent->key;
 
 		if (s.starts_with('*')) {
 			warn("Use k:* to capture keyboards. Wildcard compat mode enabled.");
 			config->compat = 1;
+			return;
 		} else if (s.starts_with("m:*")) {
 			config->wildcard |= CAP_MOUSE;
+			return;
 		} else if (s.starts_with("k:*")) {
 			config->wildcard |= CAP_KEYBOARD;
+			return;
 		} else if (s.starts_with("a:*")) {
 			config->wildcard |= CAP_MOUSE_ABS;
+			return;
 		}
-		continue;
 
 		if ((s.starts_with("m:") || s.starts_with("a:")) && s.size() - 2 <= sizeof(dev_id::id) - 3) {
 			config->ids.push_back({
@@ -878,22 +925,20 @@ static void parse_id_section(struct config *config, struct ini_section *section)
 				.id = {}
 			});
 		} else {
-			warn("%.*s is not a valid device id", (int)s.size(), s.data());
-			continue;
+			warn("[%s] line %zu: %.*s is not a valid device id", file, ln, (int)s.size(), s.data());
+			return;
 		}
 
 		memcpy(config->ids.back().id.data(), s.data(), s.size());
 	}
 }
 
-static void parse_alias_section(struct config *config, struct ini_section *section)
+static void parse_alias_section(struct config* config, const char* file, size_t ln, std::string_view s)
 {
-	for (size_t i = 0; i < section->entries.size(); i++) {
-		struct ini_entry *ent = &section->entries[i];
-		const char *name = ent->val;
-
-		if (auto desc = lookup_keycode(ent->key)) {
-			if (name && !desc.mods && !desc.wildcard && desc.id < KEYD_ENTRY_COUNT && name[0] && !name[1]) {
+	if (!s.empty()) {
+		if (auto [desc, next] = lookup_keycode(s); !next.empty()) {
+			std::string_view name = get_ini_value(next);
+			if (name.size() == 1 && !desc.mods && !desc.wildcard && desc.id < KEYD_ENTRY_COUNT) {
 				// Add modifier keys
 				if (size_t id = mod_ids.find_first_of(name[0]); id + 1 || name == "-"sv) {
 					// Remove this key from any other modifiers
@@ -901,162 +946,128 @@ static void parse_alias_section(struct config *config, struct ini_section *secti
 						std::erase(mods, desc.id);
 					if (id + 1)
 						config->modifiers[id].push_back(desc.id);
-					continue;
+					return;
 				}
 			}
-			if (name) {
+			if (name.size()) {
 				// TODO: check possibly incorrect names
-				auto alias = lookup_keycode(name);
+				auto [alias, _] = lookup_keycode(name);
 				if (alias) {
-					warn("alias name represents a valid keycode: %s", name);
+					warn("[%s] line %zu: alias name represents a valid keycode: %.*s", file, ln, (int)name.size(), name.data());
 				} else {
 					if (alias.wildcard)
-						warn("alias contains wildcard, ignored: %s", name);
-					config->aliases[name].emplace_back(desc);
+						warn("[%s] line %zu: alias contains wildcard, ignored: %.*s", file, ln, (int)name.size(), name.data());
+					config->aliases[std::string(name)].emplace_back(desc);
 				}
+				return;
 			}
 		} else {
-			warn("failed to define alias %s, %s is not a valid keycode", name, ent->key);
+			warn("[%s] line %zu: failed to define alias %.*s (not a valid keycode)", file, ln, (int)s.size(), s.data());
 		}
 	}
 }
 
-
-static int config_parse_string(struct config *config, char *content)
+void config_null_parser(struct config*, const char*, size_t, std::string_view)
 {
-	size_t i;
-	::ini ini = ini_parse_string(content, NULL);
-	if (ini.empty())
-		return -1;
+}
 
-	/* First pass: create all layers based on section headers.  */
-	for (i = 0; i < ini.size(); i++) {
-		struct ini_section *section = &ini[i];
-
-		if (section->name == "ids") {
-			parse_id_section(config, section);
-		} else if (section->name == "aliases") {
-			parse_alias_section(config, section);
-		} else if (section->name == "global") {
-			parse_global_section(config, section);
+bool config_parse(struct config *config, const char *path)
+{
+	// First pass
+	size_t chksum0 = 0;
+	if (auto section_parser = config_null_parser; !read_ini_file(path, 10, [&](const char* file, size_t ln, std::string_view line) {
+		chksum0 ^= std::hash<std::string_view>()(line);
+		if (line.starts_with('[') && line.ends_with(']')) {
+			if (line == "[ids]")
+				section_parser = parse_id_section;
+			else if (line == "[global]")
+				section_parser = parse_global_section;
+			else if (line == "[aliases]")
+				section_parser = parse_alias_section;
+			else
+				section_parser = config_null_parser;
 		} else {
-			continue;
+			section_parser(config, file, ln, line);
 		}
-
-		section->entries = {};
+	})) {
+		return false;
 	}
 
-	/* Populate each layer. */
-	for (i = 0; i < ini.size(); i++) {
-		struct ini_section *section = &ini[i];
-		std::string_view name = section->name;
-		name = name.substr(0, name.find_first_of(':'));
-		if (name.size() != section->name.size())
-			warn("obsolete layer type specifier: %s", section->name.c_str());
+	// Second pass
+	size_t chksum1 = 0;
+	if (int layer = -1; !read_ini_file(path, 10, [&](const char* file, size_t ln, std::string_view line) {
+		chksum1 ^= std::hash<std::string_view>()(line);
+		if (line.starts_with('[') && line.ends_with(']')) {
+			if (line == "[ids]" || line == "[global]" || line == "[aliases]") {
+				layer = -1;
+			} else {
+				line.remove_prefix(1);
+				line.remove_suffix(1);
+				std::string_view name = line;
+				name = line.substr(0, name.find_first_of(':'));
+				if (name.size() != line.size())
+					warn("[%s] line %zu: obsolete layer type specifier: %.*s", file, ln, (int)line.size(), line.data());
 
-		if (section->entries.empty())
-			continue;
-		// Parse section-specific modifiers
-		config->add_right_wildc = 0;
-		config->add_right_mods = 0;
-		config->add_left_wildc = 0;
-		config->add_left_mods = 0;
+				// Parse section-specific modifiers
+				config->add_right_wildc = 0;
+				config->add_right_mods = 0;
+				config->add_left_wildc = 0;
+				config->add_left_mods = 0;
 
-		while (name.size() >= 2) {
-			if (name.ends_with("**"))
-				config->add_right_wildc = -1;
-			else if (auto pos = mod_ids.find_first_of(name.back()); pos + 1 && name[name.size() - 2] == '*')
-				config->add_right_wildc |= 1 << pos;
-			else if (pos + 1 && name[name.size() - 2] == '-')
-				config->add_right_mods |= 1 << pos;
-			else
-				break;
-			name.remove_suffix(2);
-		}
+				while (name.size() >= 2) {
+					if (name.ends_with("**"))
+						config->add_right_wildc = -1;
+					else if (auto pos = mod_ids.find_first_of(name.back()); pos + 1 && name[name.size() - 2] == '*')
+						config->add_right_wildc |= 1 << pos;
+					else if (pos + 1 && name[name.size() - 2] == '-')
+						config->add_right_mods |= 1 << pos;
+					else
+						break;
+					name.remove_suffix(2);
+				}
 
-		while (name.size() >= 2) {
-			if (name.starts_with("**"))
-				config->add_left_wildc = -1;
-			else if (auto pos = mod_ids.find_first_of(name.front()); pos + 1 && name[1] == '-')
-				config->add_left_mods |= 1 << pos;
-			else if (pos + 1 && name[1] == '*')
-				config->add_left_wildc |= 1 << pos;
-			else
-				break;
-			name.remove_prefix(2);
-		}
+				while (name.size() >= 2) {
+					if (name.starts_with("**"))
+						config->add_left_wildc = -1;
+					else if (auto pos = mod_ids.find_first_of(name.front()); pos + 1 && name[1] == '-')
+						config->add_left_mods |= 1 << pos;
+					else if (pos + 1 && name[1] == '*')
+						config->add_left_wildc |= 1 << pos;
+					else
+						break;
+					name.remove_prefix(2);
+				}
 
-		for (size_t j = 0; j < section->entries.size(); j++) {
-			struct ini_entry *ent = &section->entries[j];
-			if (!ent->val) {
-				warn("invalid binding on line %zd", ent->lnum);
-				continue;
+				layer = name.empty() ? 0 : config_access_layer(config, name);
+				if (layer == -1)
+					warn("[%.*s] is not a valid layer, ignoring", (int)name.size(), name.data());
 			}
-
-			std::string entry(name);
-			entry += ".";
-			entry += ent->key;
-			entry += " = ";
-			entry += ent->val;
-			if (config_add_entry(config, entry) < 0)
-				keyd_log("\tr{ERROR:} line m{%zd}: %s\n", ent->lnum, errstr);
+		} else if (layer >= 0) {
+			if (!set_layer_entry(config, layer, line))
+				keyd_log("\tr{ERROR:} [%s] line m{%zd}: %s\n", file, ln, errstr);
 		}
+	})) {
+		return false;
+	}
 
-		section->entries = {};
+	if (chksum0 != chksum1) {
+		warn("Checksums don't match, something did interfere with config files.");
+		return false;
+	}
+
+	for (auto& layer : config->layers) {
+		layer.keymap.sort();
+		// TODO: report unreachable layers
+		if (layer.keymap.empty() && layer.chords.empty()) {
+		}
 	}
 
 	config->add_right_wildc = 0;
 	config->add_right_mods = 0;
 	config->add_left_wildc = 0;
 	config->add_left_mods = 0;
-
-	for (auto& layer : config->layers)
-		layer.keymap.sort();
-	return 0;
-}
-
-static void config_init(struct config *config)
-{
-	if (config->layers.empty()) {
-		// Populate special layers
-		config->layers.emplace_back().name = "main";
-		config->layers.emplace_back().name = "alt";
-		config->layers.emplace_back().name = "meta";
-		config->layers.emplace_back().name = "shift";
-		config->layers.emplace_back().name = "control";
-		config->layers.emplace_back().name = "altgr";
-		config->layers.emplace_back().name = "hyper";
-		config->layers.emplace_back().name = "level5";
-		config->layers.emplace_back().name = "mod7";
-	}
-
-	config->modifiers[MOD_ALT].push_back(KEYD_LEFTALT);
-	config->modifiers[MOD_SUPER].push_back(KEYD_LEFTMETA);
-	config->modifiers[MOD_SUPER].push_back(KEYD_RIGHTMETA);
-	config->modifiers[MOD_SHIFT].push_back(KEYD_LEFTSHIFT);
-	config->modifiers[MOD_SHIFT].push_back(KEYD_RIGHTSHIFT);
-	config->modifiers[MOD_CTRL].push_back(KEYD_LEFTCTRL);
-	config->modifiers[MOD_CTRL].push_back(KEYD_RIGHTCTRL);
-	config->modifiers[MOD_ALT_GR].push_back(KEYD_RIGHTALT);
-
-	/* In ms */
-	config->chord_interkey_timeout = 50;
-	config->chord_hold_timeout = 0;
-	config->oneshot_timeout = 0;
-
-	config->macro_timeout = 600;
-	config->macro_repeat_timeout = 50;
-}
-
-int config_parse(struct config *config, const char *path)
-{
-	std::string content = read_file(path);
-	if (content.empty())
-		return -1;
-
-	config_init(config);
 	config->pathstr = path;
-	return config_parse_string(config, content.data());
+	return true;
 }
 
 int config_check_match(struct config *config, const char *id, uint8_t flags)
@@ -1085,40 +1096,15 @@ int config_check_match(struct config *config, const char *id, uint8_t flags)
 	return 0;
 }
 
-/*
- * Adds a binding of the form [<layer>.]<key> = <descriptor expression>
- * to the given config. Returns layer index that was modified.
- */
-int config_add_entry(struct config* config, std::string_view exp)
+int config_add_entry(struct config* config, std::string_view section, std::string_view exp)
 {
-	char *keyname, *descstr, *dot, *paren, *s;
-	const char *layername = config->layers[0].name.c_str();
-	struct descriptor d;
-
-	static std::string buf;
-	buf.assign(exp);
-	s = buf.data();
-
-	dot = strchr(s, '.');
-	paren = strchr(s, '(');
-
-	if (dot && dot != s && (!paren || dot < paren)) {
-		layername = s;
-		*dot = 0;
-		s = dot+1;
-	}
-
-	parse_kvp(s, &keyname, &descstr);
-	int idx = config_access_layer(config, layername);
+	int idx = section.empty() ? 0 : config_access_layer(config, section);
 	if (idx == -1) {
-		err("%s is not a valid layer", layername);
+		err("%.*s is not a valid layer", (int)section.size(), section.data());
 		return -1;
 	}
 
-	if (parse_descriptor(descstr, &d, config) < 0)
-		return -1;
-
-	if (set_layer_entry(config, &config->layers[idx], keyname, &d) < 0)
+	if (!set_layer_entry(config, idx, exp))
 		return -1;
 
 	return idx;
@@ -1176,6 +1162,37 @@ void config_backup::restore(struct keyboard* kbd)
 	cfg.macros.resize(macro_count);
 	cfg.commands.resize(cmd_count);
 	cfg.modifiers = this->mods;
+}
+
+config::config()
+{
+	// Populate special layers
+	layers.emplace_back().name = "main";
+	layers.emplace_back().name = "alt";
+	layers.emplace_back().name = "meta";
+	layers.emplace_back().name = "shift";
+	layers.emplace_back().name = "control";
+	layers.emplace_back().name = "altgr";
+	layers.emplace_back().name = "hyper";
+	layers.emplace_back().name = "level5";
+	layers.emplace_back().name = "mod7";
+
+	modifiers[MOD_ALT].push_back(KEYD_LEFTALT);
+	modifiers[MOD_SUPER].push_back(KEYD_LEFTMETA);
+	modifiers[MOD_SUPER].push_back(KEYD_RIGHTMETA);
+	modifiers[MOD_SHIFT].push_back(KEYD_LEFTSHIFT);
+	modifiers[MOD_SHIFT].push_back(KEYD_RIGHTSHIFT);
+	modifiers[MOD_CTRL].push_back(KEYD_LEFTCTRL);
+	modifiers[MOD_CTRL].push_back(KEYD_RIGHTCTRL);
+	modifiers[MOD_ALT_GR].push_back(KEYD_RIGHTALT);
+
+	/* In ms */
+	chord_interkey_timeout = 50;
+	chord_hold_timeout = 0;
+	oneshot_timeout = 0;
+
+	macro_timeout = 600;
+	macro_repeat_timeout = 50;
 }
 
 config::~config()

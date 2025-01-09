@@ -227,7 +227,7 @@ struct config {
 	uint8_t add_right_wildc = 0;
 	std::string default_layout;
 
-	config() = default;
+	config();
 	config(const config&) = delete;
 	config& operator=(const config&) = delete;
 	~config();
@@ -253,8 +253,8 @@ struct config_backup {
 	void restore(struct keyboard* kbd);
 };
 
-int config_parse(struct config *config, const char *path);
-int config_add_entry(struct config *config, std::string_view);
+bool config_parse(struct config *config, const char *path);
+int config_add_entry(struct config *config, std::string_view, std::string_view);
 
 int config_check_match(struct config *config, const char *id, uint8_t flags);
 
