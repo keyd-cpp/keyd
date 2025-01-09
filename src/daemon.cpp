@@ -55,11 +55,7 @@ private:
 	int fd = -1;
 };
 
-static std::vector<listener> listeners = [] {
-	std::vector<listener> v;
-	v.reserve(32);
-	return v;
-}();
+static std::vector<listener> listeners;
 
 static struct keyboard *active_kbd = NULL;
 
@@ -355,7 +351,7 @@ static int input(char *buf, [[maybe_unused]] size_t sz, uint32_t timeout)
 
 			found = 1;
 			if (!parse_key_sequence(s, &code, &mods) && code) {
-				if (mods & MOD_SHIFT) {
+				if (mods & (1 << MOD_SHIFT)) {
 					vkbd_send_key(vkbd, KEYD_LEFTSHIFT, 1);
 					vkbd_send_key(vkbd, code, 1);
 					vkbd_send_key(vkbd, code, 0);

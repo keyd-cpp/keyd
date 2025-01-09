@@ -257,7 +257,7 @@ static descriptor lookup_keycode(std::string_view name)
 		else if (name == "level5")
 			r.id = KEYD_FAKEMOD_LEVEL5 + add;
 		else if (name == "mod7" || name == "nlock")
-			r.id = KEYD_FAKEMOD_NUMLOCK + add;
+			r.id = KEYD_FAKEMOD_NLOCK + add;
 		else
 			r.id = r.args[0].code;
 		r.mods = r.args[1].mods;
@@ -1028,22 +1028,14 @@ static void config_init(struct config *config)
 		config->layers.emplace_back().name = "mod7";
 	}
 
-	char default_config[] =
-	"[aliases]\n"
-
-	"leftshift = S\n"
-	"rightshift = S\n"
-	"leftalt = A\n"
-	"rightalt = G\n"
-	"leftmeta = M\n"
-	"rightmeta = M\n"
-	"leftctrl = C\n"
-	"rightctrl = C\n"
-
-	// Need to set H/L/N to use remaining inactive mods
-	"\n";
-
-	config_parse_string(config, default_config);
+	config->modifiers[MOD_ALT].push_back(KEYD_LEFTALT);
+	config->modifiers[MOD_SUPER].push_back(KEYD_LEFTMETA);
+	config->modifiers[MOD_SUPER].push_back(KEYD_RIGHTMETA);
+	config->modifiers[MOD_SHIFT].push_back(KEYD_LEFTSHIFT);
+	config->modifiers[MOD_SHIFT].push_back(KEYD_RIGHTSHIFT);
+	config->modifiers[MOD_CTRL].push_back(KEYD_LEFTCTRL);
+	config->modifiers[MOD_CTRL].push_back(KEYD_RIGHTCTRL);
+	config->modifiers[MOD_ALT_GR].push_back(KEYD_RIGHTALT);
 
 	/* In ms */
 	config->chord_interkey_timeout = 50;

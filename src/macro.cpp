@@ -67,7 +67,7 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 							}
 
 							if (shiftname && shiftname[0] == tok[0] && shiftname[1] == 0) {
-								ADD_ENTRY(MACRO_KEYSEQUENCE, i).mods = { .mods = MOD_SHIFT, .wildc = 0 };
+								ADD_ENTRY(MACRO_KEYSEQUENCE, i).mods = { .mods = (1 << MOD_SHIFT), .wildc = 0 };
 								break;
 							}
 
@@ -147,7 +147,7 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 						}
 
 						if (shiftname && shiftname[0] == tok[0] && shiftname[1] == 0) {
-							ADD_ENTRY(MACRO_KEYSEQUENCE, i).mods = { .mods = MOD_SHIFT, .wildc = 0 };
+							ADD_ENTRY(MACRO_KEYSEQUENCE, i).mods = { .mods = (1 << MOD_SHIFT), .wildc = 0 };
 							break;
 						}
 					}

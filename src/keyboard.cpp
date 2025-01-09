@@ -652,7 +652,7 @@ static int64_t process_descriptor(struct keyboard *kbd, uint16_t code, const str
 			update_mods(kbd, -1, 0);
 		}
 
-		if (!mods || mods == MOD_SHIFT)
+		if (!mods || mods == (1 << MOD_SHIFT))
 			kbd->last_simple_key_time = time;
 
 		break;

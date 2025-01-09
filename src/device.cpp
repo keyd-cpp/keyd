@@ -254,7 +254,7 @@ void device_scan(std::vector<device>& devices)
 		}
 	}
 
-	for (size_t i = n % std::size(workers); i < n; i++) {
+	for (size_t i = n - std::min(std::size(workers), n); i < n; i++) {
 		join(i);
 	}
 

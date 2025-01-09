@@ -12,14 +12,14 @@
 #include <string_view>
 #include <array>
 
-#define MOD_NUMLOCK	0x80
-#define MOD_LEVEL5	0x40
-#define MOD_HYPER	0x20
-#define MOD_ALT_GR	0x10
-#define MOD_CTRL	0x8
-#define MOD_SHIFT	0x4
-#define MOD_SUPER	0x2
-#define MOD_ALT		0x1
+#define MOD_NLOCK 7
+#define MOD_LEVEL5 6
+#define MOD_HYPER 5
+#define MOD_ALT_GR 4
+#define MOD_CTRL 3
+#define MOD_SHIFT 2
+#define MOD_SUPER 1
+#define MOD_ALT 0
 
 // Mod codes
 constexpr std::string_view mod_ids = "AMSCGHLN";
@@ -321,7 +321,7 @@ struct modifier {
 #define KEYD_FAKEMOD_ALTGR		904
 #define KEYD_FAKEMOD_HYPER		905
 #define KEYD_FAKEMOD_LEVEL5		906
-#define KEYD_FAKEMOD_NUMLOCK	907
+#define KEYD_FAKEMOD_NLOCK		907
 
 #define KEYD_NOOP 				(KEYD_ENTRY_COUNT-1)
 

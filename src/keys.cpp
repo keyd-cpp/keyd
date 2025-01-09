@@ -280,7 +280,7 @@ extern constexpr std::array<keycode_table_ent, KEYD_ENTRY_COUNT> keycode_table =
 	r[KEYD_FAKEMOD_ALTGR] = { "fakealtgr", nullptr, nullptr },
 	r[KEYD_FAKEMOD_HYPER] = { "fakehyper", nullptr, nullptr },
 	r[KEYD_FAKEMOD_LEVEL5] = { "fakelevel5", nullptr, nullptr },
-	r[KEYD_FAKEMOD_NUMLOCK] = { "fakemod7", "fakenlock", nullptr },
+	r[KEYD_FAKEMOD_NLOCK] = { "fakemod7", "fakenlock", nullptr },
 	r[KEYD_NOOP] = { "noop", NULL, NULL };
 	void();
 
@@ -343,7 +343,7 @@ int parse_key_sequence(std::string_view s, uint16_t* codep, uint8_t *modsp, uint
 		if (true) {
 			if (ent->shifted_name && ent->shifted_name == c) {
 
-				mods |= MOD_SHIFT;
+				mods |= (1 << MOD_SHIFT);
 
 				if (modsp)
 					*modsp = mods;
