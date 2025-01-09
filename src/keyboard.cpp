@@ -845,17 +845,20 @@ static int64_t process_descriptor(struct keyboard *kbd, uint16_t code, const str
 	case OP_TOGGLEM:
 	case OP_TOGGLE:
 		idx = d->args[0].idx;
-		if (idx < 0)
+		if (idx == -INT16_MIN)
 			break;
-		if (!idx)
+		else if (!idx)
 			idx = auto_layer();
+		else
+			idx = abs(idx);
 
 		if (pressed) {
-			kbd->layer_state[idx].toggled = !kbd->layer_state[idx].toggled;
+			auto was_toggled = kbd->layer_state[idx].toggled;
+			kbd->layer_state[idx].toggled = d->args[0].idx < 0 ? 0 : !was_toggled;
 
 			if (kbd->layer_state[idx].toggled)
 				activate_layer(kbd, code, idx);
-			else
+			else if (was_toggled)
 				deactivate_layer(kbd, idx);
 
 			update_mods(kbd, -1, 0);
