@@ -311,18 +311,10 @@ account for the physical characteristics of your keyboard.
 
 ## Unicode Support
 
-If keyd encounters a valid UTF8 sequence as a right hand value, it will try and
+If keyd encounters a valid UTF8 sequence in a macro, it will try and
 translate that sequence into a macro which emits a keyd-specific XKB sequence.
 
-In order for this to work, the sequences defined in the compose file shipped
-with keyd (_/usr/share/keyd/keyd.compose_) must be accessible. This can be achieved
-globally by copying the file to the appropriate location in
-_/usr/share/X11/locale_, or on a per-user basis by symlinking it to
-~/.XCompose.
-
-E.g.
-
-	ln -s /usr/share/keyd/keyd.compose ~/.XCompose
+In order for this to work, Ctrl+Shift+U should be supported.
 
 **Additionally you will need to be using the default US layout on your
 display server.** Users of non-english layouts are advised to set their layout
@@ -463,10 +455,11 @@ Various keyd actions accept macro expressions.
 A macro expression has one of the following forms:
 
 	. macro(<exp>)
+	. type(<text>)
+	. command(<text>)
 	. [<modifier 1>[-<modifier 2>...]-<key>
-	. <char>
 
-Where _<char>_ is a valid unicode character and _<exp>_ has the form _<token1> [<token2> ...]_ and each token is one of:
+Where _<exp>_ has the form _<token1> [<token2> ...]_ and each token is one of:
 
 	- A valid key code.
 	- A type 2 macro.
@@ -632,12 +625,6 @@ A key may optionally be bound to an _action_ which accepts zero or more argument
 	macro2(400, 50, macro(Hello space World))
 	macro2(120, 80, left)
 ```
-*command(<shell command>)*
-	Execute the given shell command.
-
-	E.g.
-
-	command(brightness down)
 
 *NOTE:* Commands defined in system-wide config are executed by the user running the keyd process
 (probably root), **but** commands added via IPC inherit the process' credentials and environmentals.

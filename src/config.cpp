@@ -19,7 +19,6 @@
 #include "keys.h"
 #include "log.h"
 #include "strutil.h"
-#include "unicode.h"
 #include <limits>
 #include <string>
 #include <string_view>

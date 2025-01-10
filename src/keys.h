@@ -331,6 +331,8 @@ int parse_key_sequence(std::string_view, uint16_t* code, uint8_t *mods, uint8_t*
 
 #define KEYD_ENTRY_COUNT			1000
 
+extern const uint16_t keys_hex[];
+
 extern const std::array<keycode_table_ent, KEYD_ENTRY_COUNT> keycode_table;
 
 std::array<char, 16> modstring(uint8_t mods);

@@ -8,7 +8,6 @@
 
 #include "keyd.h"
 #include "keys.h"
-#include "unicode.h"
 #include "config.h"
 #include "device.h"
 #include <memory>

@@ -15,6 +15,13 @@
 	#include <linux/input.h>
 #endif
 
+extern constexpr uint16_t keys_hex[] = {
+	KEY_KP0, KEY_KP1, KEY_KP2, KEY_KP3,
+	KEY_KP4, KEY_KP5, KEY_KP6, KEY_KP7,
+	KEY_KP8, KEY_KP9, KEY_A, KEY_B,
+	KEY_C, KEY_D, KEY_E, KEY_F,
+};
+
 extern constexpr std::array<keycode_table_ent, KEYD_ENTRY_COUNT> keycode_table = []() {
 	std::array<keycode_table_ent, KEYD_ENTRY_COUNT> r{};
 	r[0] = { "autokey", "auto", nullptr };

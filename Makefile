@@ -1,4 +1,4 @@
-.PHONY: all clean install uninstall debug man compose test-harness
+.PHONY: all clean install uninstall debug man test-harness
 VERSION=3.0.3-beta
 COMMIT=$(shell git describe --no-match --always --abbrev=7 --dirty)
 VKBD=uinput
@@ -57,8 +57,9 @@ ifeq ($(DISABLE_HACKS), 1)
 	CXXFLAGS +=-DDISABLE_HACKS=1
 endif
 
-all: compose man
+all: man
 	mkdir -p bin
+	mkdir -p data
 	cp scripts/keyd-application-mapper bin/
 
 ifeq ($(DISABLE_HACKS), 1)
@@ -71,9 +72,6 @@ endif
 	$(CXX) $(CXXFLAGS) -O3 $(COMPAT_FILES) src/*.cpp src/vkbd/$(VKBD).cpp -Wl,--gc-sections -Wl,-wrap,__cxa_throw -o bin/keyd $(LDFLAGS)
 debug:
 	CFLAGS="-g -fsanitize=address -Wunused" $(MAKE)
-compose:
-	mkdir -p data
-	./scripts/generate_xcompose
 man:
 	for f in docs/*.scdoc; do \
 		target=$${f%%.scdoc}.1.gz; \
@@ -111,7 +109,6 @@ install:
 	install -m644 layouts/* $(DESTDIR)$(PREFIX)/share/keyd/layouts
 	cp -r data/gnome-* $(DESTDIR)$(PREFIX)/share/keyd
 	install -m644 data/*.1.gz $(DESTDIR)$(PREFIX)/share/man/man1/
-	install -m644 data/keyd.compose $(DESTDIR)$(PREFIX)/share/keyd/
 
 uninstall:
 	-groupdel keyd
@@ -125,7 +122,7 @@ uninstall:
 		$(DESTDIR)$(PREFIX)/share/keyd/ \
 		$(DESTDIR)$(PREFIX)/bin/keyd-usb-gadget.sh
 clean:
-	rm -rf bin data/*.1.gz data/keyd.compose keyd.service src/unicode.cpp src/vkbd/usb-gadget.service
+	rm -rf bin data/*.1.gz keyd.service src/vkbd/usb-gadget.service
 test:
 	@cd t; \
 	for f in *.sh; do \
@@ -144,5 +141,4 @@ test-io:
 		src/config.cpp \
 		src/log.cpp \
 		src/keys.cpp  \
-		src/unicode.cpp && \
-	./bin/test-io t/test.conf t/*.t
+	&& ./bin/test-io t/test.conf t/*.t

@@ -48,8 +48,6 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 			} else {
 				uint32_t codepoint;
 				while (int chrsz = utf8_read_char(tok, codepoint)) {
-					int xcode;
-
 					if (chrsz == 1 && codepoint < 128) {
 						size_t i = 0;
 						for (i = 1; i < KEYD_ENTRY_COUNT; i++) {
@@ -75,8 +73,8 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 						if (i == KEYD_ENTRY_COUNT) {
 							break;
 						}
-					} else if ((xcode = unicode_lookup_index(codepoint)) > 0) {
-						ADD_ENTRY(MACRO_UNICODE, xcode).id = 0;
+					} else {
+						ADD_ENTRY(MACRO_UNICODE, codepoint).id = codepoint >> 16;
 					}
 
 					tok.remove_prefix(chrsz);
@@ -129,8 +127,6 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 		} else {
 			uint32_t codepoint;
 			if (int chrsz = utf8_read_char(tok, codepoint); chrsz + 0u == tok.size()) {
-				int xcode;
-
 				if (chrsz == 1 && codepoint < 128) {
 					size_t i = 0;
 					for (i = 1; i < KEYD_ENTRY_COUNT; i++) {
@@ -150,8 +146,8 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 					if (i < KEYD_ENTRY_COUNT) {
 						continue;
 					}
-				} else if ((xcode = unicode_lookup_index(codepoint)) > 0) {
-					ADD_ENTRY(MACRO_UNICODE, xcode).id = 0;
+				} else {
+					ADD_ENTRY(MACRO_UNICODE, codepoint).id = codepoint >> 16;
 					continue;
 				}
 			}
@@ -189,8 +185,7 @@ void macro_execute(void (*output)(uint16_t, uint8_t),
 
 		switch (ent->type) {
 			size_t j;
-			uint16_t idx;
-			uint8_t codes[4];
+			uint32_t idx;
 			uint16_t code;
 			uint8_t mods;
 
@@ -216,12 +211,22 @@ void macro_execute(void (*output)(uint16_t, uint8_t),
 		case MACRO_UNICODE:
 			idx = ent->code | (ent->id << 16);
 
-			unicode_get_sequence(idx, codes);
+			output(KEY_LEFTCTRL, 1);
+			output(KEY_LEFTSHIFT, 1);
+			output(KEY_U, 1);
+			output(KEY_U, 0);
+			output(KEY_LEFTSHIFT, 0);
+			output(KEY_LEFTCTRL, 0);
 
-			for (j = 0; j < 4; j++) {
-				output(codes[j], 1);
-				output(codes[j], 0);
+			for (int i = 7 - std::countl_zero(idx) / 4; i >= 0; i--) {
+				uint8_t val = (idx >> (i * 4)) % 16;
+				output(keys_hex[val], 1);
+				output(keys_hex[val], 0);
 			}
+
+			output(KEY_ENTER, 1);
+			output(KEY_ENTER, 0);
+			usleep(10'000);
 
 			break;
 		case MACRO_KEY_SEQ:

@@ -352,77 +352,10 @@ static void send_fail(int con, const char *fmt, ...)
 	va_end(args);
 }
 
-static int input(char *buf, [[maybe_unused]] size_t sz, uint32_t timeout)
-{
-	size_t i;
-	uint32_t codepoint;
-	uint8_t codes[4];
-	auto vkbd = ::vkbd.get();
-
-	int csz;
-
-	while ((csz = utf8_read_char(buf, &codepoint))) {
-		int found = 0;
-		char s[2];
-
-		if (csz == 1) {
-			uint16_t code;
-			uint8_t mods;
-			s[0] = (char)codepoint;
-			s[1] = 0;
-
-			found = 1;
-			if (!parse_key_sequence(s, &code, &mods) && code) {
-				if (mods & (1 << MOD_SHIFT)) {
-					vkbd_send_key(vkbd, KEYD_LEFTSHIFT, 1);
-					vkbd_send_key(vkbd, code, 1);
-					vkbd_send_key(vkbd, code, 0);
-					vkbd_send_key(vkbd, KEYD_LEFTSHIFT, 0);
-				} else {
-					vkbd_send_key(vkbd, code, 1);
-					vkbd_send_key(vkbd, code, 0);
-				}
-			} else if ((char)codepoint == ' ') {
-				vkbd_send_key(vkbd, KEYD_SPACE, 1);
-				vkbd_send_key(vkbd, KEYD_SPACE, 0);
-			} else if ((char)codepoint == '\n') {
-				vkbd_send_key(vkbd, KEYD_ENTER, 1);
-				vkbd_send_key(vkbd, KEYD_ENTER, 0);
-			} else if ((char)codepoint == '\t') {
-				vkbd_send_key(vkbd, KEYD_TAB, 1);
-				vkbd_send_key(vkbd, KEYD_TAB, 0);
-			} else {
-				found = 0;
-			}
-		}
-
-		if (!found) {
-			int idx = unicode_lookup_index(codepoint);
-			if (idx < 0) {
-				err("ERROR: could not find code for \"%.*s\"", csz, buf);
-				return -1;
-			}
-
-			unicode_get_sequence(idx, codes);
-
-			for (i = 0; i < 4; i++) {
-				vkbd_send_key(vkbd, codes[i], 1);
-				vkbd_send_key(vkbd, codes[i], 0);
-			}
-		}
-		buf+=csz;
-		vkbd_flush(vkbd);
-
-		if (timeout)
-			usleep(timeout);
-	}
-
-	return 0;
-}
-
 static bool handle_message(::listener& con, struct config* config, const std::shared_ptr<env_pack>& env)
 {
 	struct ipc_message msg;
+	std::string input_buf;
 	if (!xread(con, &msg, sizeof(msg))) {
 		// Disconnected
 		return false;
@@ -443,11 +376,18 @@ static bool handle_message(::listener& con, struct config* config, const std::sh
 	switch (msg.type) {
 		int success;
 
+	case IPC_INPUT:
 	case IPC_MACRO:
 		while (msg.sz && msg.data[msg.sz-1] == '\n')
 			msg.data[--msg.sz] = 0;
 
-		if (macro_parse(msg.data, macro, config)) {
+		if (msg.type == IPC_INPUT)
+			input_buf += "type(";
+		input_buf += msg.data;
+		if (msg.type == IPC_INPUT)
+			input_buf += ")";
+
+		if (macro_parse(input_buf, macro, config)) {
 			send_fail(con, "%s", errstr);
 			break;
 		}
@@ -455,12 +395,6 @@ static bool handle_message(::listener& con, struct config* config, const std::sh
 		macro_execute(send_key, macro, msg.timeout, config);
 		send_success(con);
 
-		break;
-	case IPC_INPUT:
-		if (input(msg.data, msg.sz, msg.timeout))
-			send_fail(con, "%s", errstr);
-		else
-			send_success(con);
 		break;
 	case IPC_RELOAD:
 		reload(std::move(env));
