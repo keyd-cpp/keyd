@@ -89,15 +89,6 @@ int monitor(int argc, char *argv[])
 	if (isatty(1))
 		set_tflags(ECHO, 0);
 
-	if (fstat(1, &st)) {
-		perror("fstat");
-		exit(-1);
-	}
-
-	/* If stdout is a process, terminate on pipe closures. */
-	if (st.st_mode & S_IFIFO)
-		evloop_add_fd(1);
-
 	setvbuf(stdout, NULL, _IOLBF, 0);
 	setvbuf(stderr, NULL, _IOLBF, 0);
 

@@ -237,7 +237,7 @@ uint64_t run_test(struct keyboard *kbd, const char *path)
 		print_diff(expected, nexpected, output, noutput);
 		exit(-1);
 	} else {
-		printf("%s \033[32;1mPASSED\033[0m (%zu us)\n", path, time / 1000);
+		printf("%s \033[32;1mPASSED\033[0m (%zu us)\n", path, size_t(time) / 1000);
 	}
 
 	fflush(stdout);
@@ -285,7 +285,7 @@ int main(int argc, char *argv[])
 	for (i = 2; i < argc; i++)
 		total_time += run_test(kbd.get(), argv[i]);
 
-	printf("\nTotal time spent in the main loop: %zu us\n", total_time / 1000);
+	printf("\nTotal time spent in the main loop: %zu us\n", size_t(total_time) / 1000);
 	return 0;
 }
 

@@ -116,22 +116,16 @@ static constexpr split_str<-1u> split_chars(std::string_view str, const char* pa
 
 // Return owning string_view-alike thing
 template <size_t Size>
-struct res : protected std::string_view {
+struct concat_res {
 	char data[Size];
+	size_t size;
 	const char* c_str() const { return data; }
-	std::string_view get() const { return *this; }
-	using std::string_view::starts_with;
-	using std::string_view::ends_with;
+	std::string_view get() const { return {data, size}; }
 };
 
 template <typename... Args, size_t Size = (1 + ... + (std::is_integral_v<Args> ? sizeof(Args) * 3 : sizeof(Args)))>
-static constexpr res<Size> concat(const Args&... args) {
-	struct wrapper : public res<Size> {
-		void set(const char* ptr) {
-			static_cast<std::string_view&>(*this) = {this->data, ptr};
-		}
-	} result{};
-
+static constexpr concat_res<Size> concat(const Args&... args) {
+	concat_res<Size> result{};
 	char* ptr = result.data;
 	([&] {
 		if constexpr (std::is_integral_v<Args>)
@@ -143,7 +137,7 @@ static constexpr res<Size> concat(const Args&... args) {
 			exit(-1);
 		}
 	}(), ...);
-	result.set(ptr);
+	result.size = ptr - result.data;
 	return result;
 }
 

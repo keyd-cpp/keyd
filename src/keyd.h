@@ -165,19 +165,17 @@ struct file_mapper
 			return;
 		}
 
-		struct stat _stat;
-		if (fstat(fd, &_stat) < 0) {
-			perror("fstat");
+		if (auto seek = lseek(fd, 0, SEEK_END); seek < 0) {
+			perror("lseek");
 			close(fd);
 			return;
-		}
-
-		if (_stat.st_size == 0 || _stat.st_size > UINT32_MAX) {
+		} else if (size_t(seek) > UINT32_MAX / 4) {
 			close(fd);
 			return;
+		} else {
+			this->size = seek;
 		}
 
-		this->size = _stat.st_size;
 		this->ptr = ::mmap(nullptr, this->size + size_t(1), PROT_READ, MAP_PRIVATE | MAP_SHARED, fd, 0);
 		if (intptr_t(this->ptr) == -1) {
 			perror("mmap");

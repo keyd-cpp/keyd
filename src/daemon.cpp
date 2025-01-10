@@ -187,7 +187,7 @@ static void load_configs()
 			continue;
 
 		auto name = concat(CONFIG_DIR "/", dirent->d_name);
-		if (name.ends_with(".conf")) {
+		if (name.get().ends_with(".conf")) {
 			keyd_log("CONFIG: parsing b{%s}\n", name.c_str());
 
 			auto kbd = std::make_unique<keyboard>();
@@ -696,7 +696,7 @@ int run_daemon(int, char *[])
 
 	atexit(cleanup);
 
-	keyd_log("Starting keyd " VERSION "\n");
+	keyd_log("Starting keyd++ " VERSION "\n");
 	evloop(event_handler);
 
 	return 0;

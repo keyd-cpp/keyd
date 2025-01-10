@@ -383,7 +383,7 @@ static bool set_layer_entry(struct config *config, int16_t idx, std::string_view
 			}
 
 			if (n >= ARRAY_SIZE(chord.keys)) {
-				err("chords cannot contain more than %ld keys", n);
+				err("chords cannot contain more than %zu keys", n);
 				return -1;
 			}
 

@@ -63,7 +63,9 @@ int evloop(int (*event_handler) (struct event *ev))
 	pfds[0].events = POLLIN;
 	pfds[1].fd = aux_fd;
 	pfds[1].events = POLLIN;
-	auto pfdsd = pfds + 2;
+	pfds[2].fd = STDOUT_FILENO;
+	pfds[2].events = 0;
+	auto pfdsd = pfds + 3;
 
 	while (1) {
 		int removed = 0;
@@ -87,6 +89,11 @@ int evloop(int (*event_handler) (struct event *ev))
 		poll(pfds, i + (pfdsd - pfds), timeout > 0 ? timeout : -1);
 		ev.timestamp = get_time_ms();
 		elapsed = ev.timestamp - start_time;
+
+		if (pfds[2].revents) {
+			// Handle pipe closure
+			return 0;
+		}
 
 		if (timeout > 0 && elapsed >= timeout) {
 			ev.type = EV_TIMEOUT;
@@ -135,7 +142,6 @@ int evloop(int (*event_handler) (struct event *ev))
 				timeout = event_handler(&ev);
 			}
 		}
-
 
 		if (pfds[0].revents) {
 			struct device dev;

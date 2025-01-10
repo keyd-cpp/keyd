@@ -7,8 +7,6 @@
 #include "keyd.h"
 
 #include <stdio.h>
-#include <pthread.h>
-#include <sys/single_threaded.h>
 #include <string.h>
 #include <sys/types.h>
 #include <dirent.h>
@@ -20,6 +18,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <sys/inotify.h>
+#include <numeric>
 
 /*
  * Abstract away evdev and inotify.
@@ -204,62 +203,25 @@ static int device_init(struct device *dev)
 	return -1;
 }
 
-struct device_worker {
-	pthread_t tid;
-	struct device dev;
-};
-
-static void *device_scan_worker(void *arg)
-{
-	struct device_worker *w = (struct device_worker *)arg;
-	if (device_init(&w->dev) < 0)
-		return NULL;
-
-	return &w->dev;
-}
-
 void device_scan(std::vector<device>& devices)
 {
-	devices.clear();
-	struct device_worker workers[16]; // Ring buffer
+	assert(devices.empty());
 	DIR *dh = opendir("/dev/input/");
-	size_t n = 0;
-
 	if (!dh) {
 		perror("opendir /dev/input");
 		exit(-1);
 	}
 
-	const char single_threaded = __libc_single_threaded;
-
-	auto join = [&] (size_t n) {
-		struct device *d;
-		struct device_worker *w = &workers[n % std::size(workers)];
-		pthread_join(w->tid, (void**)&d);
-		if (d)
-			devices.emplace_back(std::move(w->dev));
-	};
-
 	while (struct dirent* ent = readdir(dh)) {
 		if (ent->d_type != DT_DIR && !memcmp(ent->d_name, "event", 5)) {
-			struct device_worker *w = &workers[n % std::size(workers)];
-			if (n >= std::size(workers)) {
-				join(n);
-			}
-
-			w->dev = {};
-			w->dev.num = atoi(ent->d_name + 5);
-			pthread_create(&w->tid, NULL, device_scan_worker, w);
-			n++;
+			auto& dev = devices.emplace_back();
+			dev.num = atoi(ent->d_name + 5);
+			if (device_init(&dev) < 0)
+				devices.pop_back();
 		}
 	}
 
-	for (size_t i = n - std::min(std::size(workers), n); i < n; i++) {
-		join(i);
-	}
-
 	closedir(dh);
-	__libc_single_threaded = single_threaded;
 }
 
 /*
@@ -324,9 +286,8 @@ int devmon_read_device(int fd, struct device *dev)
 
 int device_grab(struct device *dev)
 {
-	size_t i;
 	struct input_event ev;
-	uint8_t state[KEY_MAX / 8 + 1];
+	uint8_t state[KEY_MAX / 8 + 1]{};
 	int pending_release = 0;
 
 	if (dev->grabbed)
@@ -338,28 +299,19 @@ int device_grab(struct device *dev)
 	 */
 
 	for (size_t i = 0; i < 1000; i++) {
-		int n = 0;
-		memset(state, 0, sizeof(state));
-
 		if (ioctl(dev->fd, EVIOCGKEY(sizeof state), state) < 0) {
 			perror("ioctl EVIOCGKEY");
 			return -1;
 		}
 
-		for (i = 0; i < KEY_MAX; i++) {
-			if ((state[i / 8] >> (i % 8)) & 0x1)
-				n++;
-		}
-
-		if (n == 0)
+		pending_release = std::accumulate(+state, std::end(state), 0);
+		if (!pending_release)
 			break;
-		else
-			pending_release = 1;
-		usleep(1000);
+		usleep(10'000);
 	}
 
 	if (pending_release) {
-		for (i = 0; i < KEY_MAX; i++) {
+		for (size_t i = 0; i <= KEY_MAX; i++) {
 			if ((state[i / 8] >> (i % 8)) & 0x1)
 				printf("Waiting for key %s...\n", KEY_NAME(i));
 		}

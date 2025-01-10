@@ -6,6 +6,10 @@
 
 #include "keyd.h"
 
+extern "C" {
+	__attribute__((weak)) char __libc_single_threaded = 1;
+}
+
 extern "C" char* __cxa_demangle(const char* mangled_name, char* output_buffer, size_t* length, int* status)
 {
 	// Return mangled name to remove demangler from ELF
@@ -25,6 +29,20 @@ extern "C" char* __cxa_demangle(const char* mangled_name, char* output_buffer, s
 	return static_cast<char*>(buf);
 }
 
+extern "C" int64_t __pthread_key_create(int64_t)
+{
+	return 0;
+}
+
+extern "C" int pthread_once (pthread_once_t *__once_control, void (*__init_routine) (void))
+{
+	if (!*__once_control) {
+		*__once_control = 1;
+		__init_routine();
+	}
+	return 0;
+}
+
 static int ipc_exec(enum ipc_msg_type_e type, const char *data, size_t sz, uint32_t timeout)
 {
 	struct ipc_message msg;
@@ -36,11 +54,13 @@ static int ipc_exec(enum ipc_msg_type_e type, const char *data, size_t sz, uint3
 	msg.timeout = timeout;
 	memcpy(msg.data, data, sz);
 
-	static int con = ipc_connect();
-
-	if (con < 0) {
-		perror("connect");
-		exit(-1);
+	static int con = -1;
+	if (con == -1) {
+		con = ipc_connect();
+		if (con < 0) {
+			perror("connect");
+			exit(-1);
+		}
 	}
 
 	xwrite(con, &msg, sizeof msg);
@@ -61,7 +81,7 @@ static int ipc_exec(enum ipc_msg_type_e type, const char *data, size_t sz, uint3
 
 static int version(int, char *[])
 {
-	printf("keyd " VERSION "\n");
+	printf("keyd++ " VERSION "\n");
 
 	return 0;
 }
@@ -73,7 +93,7 @@ static int help(int, char *[])
 	       "    monitor [-t]                   Print key events in real time.\n"
 	       "    list-keys                      Print a list of valid key names.\n"
 	       "    reload                         Trigger a reload .\n"
-	       "    listen                         Print layer state changes of the running keyd daemon to stdout.\n"
+	       "    listen                         Print layer state changes of the running keyd++ daemon to stdout.\n"
 	       "    bind <binding> [<binding>...]  Add the supplied bindings to all loaded configs.\n"
 	       "Options:\n"
 	       "    -v, --version      Print the current version and exit.\n"
@@ -294,5 +314,6 @@ int main(int argc, char *argv[])
 		return help(argc, argv);
 	}
 
+	memcpy(argv[0], "keyd++", 7);
 	run_daemon(argc, argv);
 }

@@ -55,7 +55,7 @@ endif
 all: compose man
 	mkdir -p bin
 	cp scripts/keyd-application-mapper bin/
-	$(CXX) $(CXXFLAGS) -O3 $(COMPAT_FILES) src/*.cpp src/vkbd/$(VKBD).cpp -lpthread -Wl,--gc-sections -o bin/keyd $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) -O3 $(COMPAT_FILES) src/*.cpp src/vkbd/$(VKBD).cpp -Wl,--gc-sections -o bin/keyd $(LDFLAGS)
 debug:
 	CFLAGS="-g -fsanitize=address -Wunused" $(MAKE)
 compose:
@@ -92,7 +92,7 @@ install:
 	mkdir -p $(DESTDIR)$(PREFIX)/share/doc/keyd/examples/
 
 	-groupadd keyd
-	install -m755 bin/* $(DESTDIR)$(PREFIX)/bin/
+	install -m755 bin/keyd bin/keyd-application-mapper $(DESTDIR)$(PREFIX)/bin/
 	install -m644 docs/*.md $(DESTDIR)$(PREFIX)/share/doc/keyd/
 	install -m644 examples/* $(DESTDIR)$(PREFIX)/share/doc/keyd/examples/
 	install -m644 layouts/* $(DESTDIR)$(PREFIX)/share/keyd/layouts

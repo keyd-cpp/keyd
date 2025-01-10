@@ -14,9 +14,23 @@
 
 static void chgid()
 {
-	struct group *g = getgrnam("keyd");
+	struct group gb{};
+	struct group* g = nullptr;
+
+	// Can parse /etc/group but probably unnecessary
+	// file_mapper groups(open("/etc/group", O_RDONLY));
 
 	if (!g) {
+		// Attempt to use dummy stack buffer, then fallback to getgrnam if it fails
+		char buf[1024];
+		if (getgrnam_r("keyd", &gb, buf, sizeof(buf) - 1, &g) < 0 || !g) {
+			perror("getgrnam_r");
+			g = getgrnam("keyd");
+		}
+	}
+
+	if (!g) {
+		perror("getgrnam");
 		fprintf(stderr,
 			"WARNING: failed to set effective group to \"keyd\" (make sure the group exists)\n");
 	} else {
