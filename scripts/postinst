@@ -1,0 +1,6 @@
+#!/bin/bash
+
+groupadd keyd
+systemctl daemon-reload
+systemctl enable keyd
+systemctl start keyd

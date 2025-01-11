@@ -1,5 +1,5 @@
-.PHONY: all clean install uninstall debug man compose test-harness
-VERSION=3.0.3-beta
+.PHONY: all clean install deb uninstall debug man compose test-harness
+VERSION=3.0.4
 COMMIT=$(shell git describe --no-match --always --abbrev=7 --dirty)
 VKBD=uinput
 PREFIX?=/usr/local
@@ -78,8 +78,46 @@ man:
 	for f in docs/*.scdoc; do \
 		target=$${f%%.scdoc}.1.gz; \
 		target=data/$${target##*/}; \
-		scdoc < "$$f" | gzip > "$$target"; \
+		scdoc < "$$f" | gzip -9 > "$$target"; \
 	done
+deb:
+	-rm -r keyd++-$(VERSION)
+	mkdir -p -m775 keyd++-$(VERSION)
+	mkdir -p -m775 keyd++-$(VERSION)/bin
+	mkdir -p -m775 keyd++-$(VERSION)/DEBIAN
+	mkdir -p -m775 keyd++-$(VERSION)/etc/keyd
+	mkdir -p -m775 keyd++-$(VERSION)/usr/share/keyd/layouts/
+	mkdir -p -m775 keyd++-$(VERSION)/usr/share/man/man1/
+	mkdir -p -m775 keyd++-$(VERSION)/usr/share/doc/keyd/examples/
+	mkdir -p -m775 keyd++-$(VERSION)/usr/lib/systemd/system
+
+	install -m775 bin/keyd keyd++-$(VERSION)/bin/
+	install -m664 data/default.conf keyd++-$(VERSION)/etc/keyd/
+	install -m664 docs/*.md keyd++-$(VERSION)/usr/share/doc/keyd/
+	cat LICENSE > keyd++-$(VERSION)/usr/share/doc/keyd/copyright
+	install -m664 examples/* keyd++-$(VERSION)/usr/share/doc/keyd/examples/
+	install -m664 layouts/* keyd++-$(VERSION)/usr/share/keyd/layouts
+	install -m664 data/keyd.1.gz keyd++-$(VERSION)/usr/share/man/man1/
+	install -m775 scripts/postinst keyd++-$(VERSION)/DEBIAN/
+	sed -e 's#@PREFIX@##' keyd.service.in > keyd++-$(VERSION)/usr/lib/systemd/system/keyd.service
+
+	touch keyd++-$(VERSION)/DEBIAN/conffiles
+	echo "/etc/keyd/default.conf" >> keyd++-$(VERSION)/DEBIAN/conffiles
+	touch keyd++-$(VERSION)/DEBIAN/control
+	echo "Package: keyd++" >> keyd++-$(VERSION)/DEBIAN/control
+	echo "Version: $(VERSION)" >> keyd++-$(VERSION)/DEBIAN/control
+	echo "Priority: optional" >> keyd++-$(VERSION)/DEBIAN/control
+	echo "Architecture: "`dpkg-architecture -q DEB_TARGET_ARCH` >> keyd++-$(VERSION)/DEBIAN/control
+	echo "Maintainer: Nekotekina <nekotekina@gmail.com>" >> keyd++-$(VERSION)/DEBIAN/control
+	echo "Homepage: https://github.com/keyd-cpp/" >> keyd++-$(VERSION)/DEBIAN/control
+	echo "Description: Simple system-wide key remapping daemon" >> keyd++-$(VERSION)/DEBIAN/control
+	echo "Conflicts: keyd" >> keyd++-$(VERSION)/DEBIAN/control
+	echo "Replaces: keyd" >> keyd++-$(VERSION)/DEBIAN/control
+	echo "Depends: libc6 (>= 2.17), systemd" >> keyd++-$(VERSION)/DEBIAN/control
+
+	dpkg-deb -Zgzip --root-owner-group --build keyd++-$(VERSION) keyd++-$(VERSION).`dpkg-architecture -q DEB_TARGET_ARCH`.deb
+	rm -r keyd++-$(VERSION)
+
 install:
 
 	@if [ -n '$(SYSTEMD_SYSTEM_DIR)' ]; then \
