@@ -1,7 +1,5 @@
 #include "keyd.h"
 
-#define MAX_AUX_FDS 32
-
 static int aux_fd = -1;
 std::vector<device> device_table;
 
@@ -92,7 +90,7 @@ int evloop(int (*event_handler) (struct event *ev))
 
 		if (pfds[2].revents) {
 			// Handle pipe closure
-			return 0;
+			break;
 		}
 
 		if (timeout > 0 && elapsed >= timeout) {

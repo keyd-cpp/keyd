@@ -10,7 +10,6 @@
 #include <string.h>
 #include <sys/types.h>
 #include <dirent.h>
-#include <fcntl.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -464,12 +463,11 @@ void device_set_led(const struct device *dev, uint8_t led, int state)
 	if (led > LED_MAX || !(dev->capabilities & CAP_LEDS))
 		return;
 
-	struct input_event ev = {
-		.time = {},
-		.type = EV_LED,
-		.code = led,
-		.value = state
-	};
+	struct input_event ev[2]{};
+	ev[0].type = EV_LED;
+	ev[0].code = led;
+	ev[0].value = state;
+	ev[1].type = EV_SYN;
 
 	xwrite(dev->fd, &ev, sizeof ev);
 }

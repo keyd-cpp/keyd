@@ -6,6 +6,7 @@ PREFIX?=/usr/local
 
 CONFIG_DIR?=/etc/keyd
 SOCKET_PATH=/var/run/keyd.socket
+DISABLE_HACKS=0
 
 # If this variable is set to the empty string, no systemd unit files will be
 # installed.
@@ -28,7 +29,7 @@ CFLAGS:=-DVERSION=\"v$(VERSION)\ \($(COMMIT)\)\" \
 
 CXXFLAGS:=-DVERSION=\"v$(VERSION)\ \($(COMMIT)\)\" \
 	-I/usr/local/include \
-	-L/usr/local/lib \
+	-L. -L/usr/local/lib \
 	-Wall \
 	-Wextra \
 	-Wno-unused \
@@ -52,10 +53,22 @@ else
 	COMPAT_FILES=
 endif
 
+ifeq ($(DISABLE_HACKS), 1)
+	CXXFLAGS +=-DDISABLE_HACKS=1
+endif
+
 all: compose man
 	mkdir -p bin
 	cp scripts/keyd-application-mapper bin/
-	$(CXX) $(CXXFLAGS) -O3 $(COMPAT_FILES) src/*.cpp src/vkbd/$(VKBD).cpp -Wl,--gc-sections -o bin/keyd $(LDFLAGS)
+
+ifeq ($(DISABLE_HACKS), 1)
+	-rm libgcc_eh.a
+else
+	$(CXX) -w -O2 -c unwind.cpp
+	ar rcs libgcc_eh.a unwind.o
+	rm unwind.o
+endif
+	$(CXX) $(CXXFLAGS) -O3 $(COMPAT_FILES) src/*.cpp src/vkbd/$(VKBD).cpp -Wl,--gc-sections -Wl,-wrap,__cxa_throw -o bin/keyd $(LDFLAGS)
 debug:
 	CFLAGS="-g -fsanitize=address -Wunused" $(MAKE)
 compose:

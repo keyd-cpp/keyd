@@ -173,11 +173,14 @@ struct env_pack {
 	gid_t gid;
 
 	const char* getenv(std::string_view);
+
+	bool operator==(const env_pack& rhs) const
+	{
+		return uid == rhs.uid && gid == rhs.gid && buf == rhs.buf;
+	}
 };
 
 struct ucmd {
-	uid_t uid;
-	gid_t gid;
 	std::string cmd;
 	std::shared_ptr<env_pack> env = nullptr;
 };
@@ -199,9 +202,7 @@ struct config {
 	std::vector<ucmd> commands;
 	std::map<std::string, std::vector<descriptor>, std::less<>> aliases;
 
-	uid_t cfg_use_uid = 0;
-	gid_t cfg_use_gid = 0;
-	std::shared_ptr<env_pack> env;
+	std::shared_ptr<env_pack> cmd_env;
 
 	std::vector<dev_id> ids;
 
@@ -246,6 +247,7 @@ struct config_backup {
 	// These ones are nasty
 	std::vector<layer_backup> layers;
 	decltype(config::modifiers) mods;
+	std::shared_ptr<env_pack> _env;
 
 	explicit config_backup(const struct config& cfg);
 	~config_backup();

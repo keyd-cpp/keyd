@@ -9,7 +9,6 @@
 #include <assert.h>
 #include <ctype.h>
 #include <dirent.h>
-#include <fcntl.h>
 #include <grp.h>
 #include <limits.h>
 #include <poll.h>
@@ -30,6 +29,7 @@
 #include <getopt.h>
 #include <errno.h>
 #include <time.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 #ifdef __FreeBSD__
@@ -176,7 +176,7 @@ struct file_mapper
 			this->size = seek;
 		}
 
-		this->ptr = ::mmap(nullptr, this->size + size_t(1), PROT_READ, MAP_PRIVATE | MAP_SHARED, fd, 0);
+		this->ptr = ::mmap(nullptr, this->size + size_t(1), PROT_READ, MAP_SHARED, fd, 0);
 		if (intptr_t(this->ptr) == -1) {
 			perror("mmap");
 			close(fd);

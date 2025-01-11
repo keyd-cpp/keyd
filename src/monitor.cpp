@@ -24,7 +24,8 @@ static void cleanup()
 	/* Drain STDIN (useful for scripting). */
 	set_tflags(ICANON, 0);
 	char buf[4096];
-	fcntl(0, F_SETFL, O_NONBLOCK);
+	int arg = 1;
+	ioctl(0, FIONBIO, &arg);
 	while(read(0, buf, sizeof buf) > 0) {}
 
 	set_tflags(ICANON|ECHO, 1);

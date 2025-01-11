@@ -5,9 +5,224 @@
  */
 
 #include "keyd.h"
+#include <link.h>
+#include <charconv>
+#include <numeric>
+
+#if (defined(__GLIBCXX__) || defined(__GLIBCPP__)) && !defined(DISABLE_HACKS)
+
+#if defined(__GLIBC__)
+extern "C" void _init();
+
+static void call_init(int argc, char **argv, char **envp)
+{
+	uintptr_t reloc = 0;
+	decltype(&call_init) init = nullptr;
+	decltype(&call_init)* inits = nullptr;
+	size_t init_sz = 0;
+	for (size_t i = 0;; i++) {
+		auto& dyn = _DYNAMIC[i];
+		if (dyn.d_tag == DT_NULL)
+			break;
+		if (dyn.d_tag == DT_INIT) {
+			// Use _init symbol to detect self location in memory
+			reloc = uintptr_t(&_init) - dyn.d_un.d_ptr;
+			init = decltype(init)(dyn.d_un.d_ptr + reloc);
+		}
+		if (dyn.d_tag == DT_INIT_ARRAYSZ) {
+			init_sz = dyn.d_un.d_val / sizeof(&call_init);
+		}
+	}
+
+	if (!reloc) {
+		fprintf(stderr, "Failed to locate self, exiting.\n");
+		exit(-1);
+	}
+
+	for (size_t i = 0;; i++) {
+		auto& dyn = _DYNAMIC[i];
+		if (dyn.d_tag == DT_NULL)
+			break;
+		if (dyn.d_tag == DT_INIT_ARRAY) {
+			inits = decltype(inits)(dyn.d_un.d_ptr + reloc);
+		}
+	}
+
+	// Call initialization functions
+	if (init)
+		init(argc, argv, envp);
+	for (size_t i = 0; i < init_sz; i++)
+		inits[i](argc, argv, envp);
+}
+
+// Hijack libc start function to reduce GLIBC requirement
+// It seems only powerpc has a different implementation
+extern "C" int __libc_start_main(int (*main)(int, char **, char **), int argc, char **argv,
+	void (*init)(void),
+	void (*fini)(void),
+	void (*rtld_fini)(void),
+	void *stack_end)
+{
+	// Some debug stuff ignored (please check twice with glibc sources)
+	(void)init; // Should be null
+	(void)fini; // Should be null
+	if (rtld_fini)
+		atexit(rtld_fini);
+	(void)stack_end;
+	call_init(argc, argv, __environ);
+	exit(main(argc, argv, __environ));
+}
+#endif /* __GLIBC__ */
 
 extern "C" {
+	// I don't know how it will behave if we use threads. Just set it to 0 in that case maybe.
 	__attribute__((weak)) char __libc_single_threaded = 1;
+}
+
+// Seems unused but bumps GLIBC requirement
+extern "C" int64_t __pthread_key_create(int64_t)
+{
+	fprintf(stderr, "%s unimplemented (unexpected)\n", __func__);
+	exit(-1);
+}
+
+extern "C" int pthread_once(pthread_once_t* once_control, void (*init_routine)(void))
+{
+	if (!__libc_single_threaded) {
+		fprintf(stderr, "%s is single-thread\n", __func__);
+		exit(-1);
+	}
+	if (*once_control == PTHREAD_ONCE_INIT) {
+		*once_control = PTHREAD_ONCE_INIT + 1;
+		init_routine();
+	}
+	return 0;
+}
+
+template <typename T, typename UT = std::make_unsigned_t<T>>
+T isoc23_strto(const char*__restrict__ nptr, char**__restrict__ endptr, int base)
+{
+	// Rough implementation replacing these dependencies on newer stdlibc++
+	// This isoc23 stuff causes lots of problems even on modern distros, but why?
+	bool neg = false;
+	const char* dummy = nullptr;
+	const char** end = endptr ? const_cast<const char**>(endptr) : &dummy;
+	if (base) {
+		if (base <= 1 || base > 36) {
+			*end = nptr;
+			return 0;
+		}
+	}
+	while (isspace(nptr[0]))
+		nptr++;
+	if (!nptr[0]) {
+		*end = nptr;
+		return 0;
+	}
+	if (nptr[0] == '+')
+		nptr++;
+	else if (nptr[0] == '-')
+		nptr++, neg = true;
+	if (!nptr[0]) {
+		*end = nptr;
+		return 0;
+	}
+	std::string_view str(nptr, 2);
+	if (str == "0x" || str == "0X") {
+		if (base == 0 || base == 16) {
+			base = 16;
+			nptr += 2;
+		} else {
+			*end = nptr + 1;
+			return 0;
+		}
+	} else if (str == "0b" || str == "0B") {
+		if (base == 0 || base == 2) {
+			base = 2;
+			nptr += 2;
+		} else {
+			*end = nptr + 1;
+			return 0;
+		}
+	} else if (str.starts_with("0") && base == 0) {
+		// Leading zeros aren't allowed in other cases?
+		base = 8;
+	} else if (base == 0) {
+		base = 10;
+	}
+	constexpr std::string_view digits = "0123456789abcdefghijklmnopqrstuvwxyz";
+	auto ptr2 = nptr;
+	for (size_t i = 0;; i++) {
+		if (nptr[i] == '+' || nptr[i] == '-') {
+			*end = nptr;
+			return 0;
+		}
+		if (base > 10 && nptr[i] >= 'A' && nptr[i] <= 'Z') {
+			if (digits.find_first_of(nptr[i] + 32) >= size_t(base))
+				break;
+		} else {
+			if (digits.find_first_of(nptr[i]) >= size_t(base))
+				break;
+		}
+		if (!nptr[i])
+			break;
+		ptr2++;
+	}
+
+	UT val = 0;
+	auto res = std::from_chars(nptr, ptr2, val, base);
+	*end = res.ptr;
+	if constexpr (std::is_signed_v<T>) {
+		if (val > std::numeric_limits<T>::max() + UT(neg))
+			res.ec = std::errc::result_out_of_range;
+	}
+	if (res.ec == std::errc::result_out_of_range) {
+		errno = ERANGE;
+		if constexpr (std::is_signed_v<T>) {
+			if (neg)
+				return std::numeric_limits<T>::min();
+		}
+		return std::numeric_limits<T>::max();
+	}
+	if (neg)
+		return UT(0) - val;
+	return val;
+}
+
+extern "C" long __isoc23_strtol(const char *__restrict nptr, char **__restrict endptr, int base)
+{
+	return isoc23_strto<long>(nptr, endptr, base);
+}
+
+extern "C" unsigned long __isoc23_strtoul(const char *__restrict nptr, char **__restrict endptr, int base)
+{
+	return isoc23_strto<unsigned long>(nptr, endptr, base);
+}
+
+extern "C" long long __isoc23_strtoll(const char *__restrict nptr, char **__restrict endptr, int base)
+{
+	return isoc23_strto<long long>(nptr, endptr, base);
+}
+
+extern "C" unsigned long long __isoc23_strtoull(const char *__restrict nptr, char **__restrict endptr, int base)
+{
+	return isoc23_strto<unsigned long long>(nptr, endptr, base);
+}
+
+#endif /* libstdc++ hacks */
+
+namespace __cxxabiv1 {
+	// Probably makes __cxa_demangle unnecessary
+	extern const auto __terminate_handler = abort;
+}
+
+// Emulate verbose terminate caller but avoid libunwind (libgcc_eh.a replaced with dummy)
+// Removing libunwind also reduces GLIBC requirements
+extern "C" void __wrap___cxa_throw(void* ex, std::type_info* tinfo, void (*)(void*))
+{
+	// Assume only std::exception descendants are thrown
+	fprintf(stderr, "Thrown exception of type %s\n\twhat(): %s\n", tinfo->name(), static_cast<std::exception*>(ex)->what());
+	abort();
 }
 
 extern "C" char* __cxa_demangle(const char* mangled_name, char* output_buffer, size_t* length, int* status)
@@ -27,20 +242,6 @@ extern "C" char* __cxa_demangle(const char* mangled_name, char* output_buffer, s
 		*status = 0;
 	memcpy(buf, mangled_name, name.size() + 1);
 	return static_cast<char*>(buf);
-}
-
-extern "C" int64_t __pthread_key_create(int64_t)
-{
-	return 0;
-}
-
-extern "C" int pthread_once (pthread_once_t *__once_control, void (*__init_routine) (void))
-{
-	if (!*__once_control) {
-		*__once_control = 1;
-		__init_routine();
-	}
-	return 0;
 }
 
 static int ipc_exec(enum ipc_msg_type_e type, const char *data, size_t sz, uint32_t timeout)

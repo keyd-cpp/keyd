@@ -61,8 +61,6 @@ static struct keyboard *active_kbd = NULL;
 
 static void cleanup()
 {
-	configs.clear();
-	vkbd.reset();
 }
 
 static void clear_vkbd()
@@ -262,7 +260,7 @@ static void manage_device(struct device *dev)
 	}
 }
 
-static void reload(std::shared_ptr<env_pack> env)
+static void reload(const std::shared_ptr<env_pack>& env)
 {
 	restore_leds();
 	load_configs();
@@ -289,9 +287,7 @@ static void reload(std::shared_ptr<env_pack> env)
 		}
 
 		for (auto& kbd : configs) {
-			kbd->config.cfg_use_uid = env->uid;
-			kbd->config.cfg_use_gid = env->gid;
-			kbd->config.env = env;
+			kbd->config.cmd_env = env;
 			for (auto str : split_char<'\n'>(file.view())) {
 				if (str.empty())
 					continue;
@@ -396,7 +392,7 @@ static int input(char *buf, [[maybe_unused]] size_t sz, uint32_t timeout)
 	return 0;
 }
 
-static bool handle_message(::listener& con, struct config* config, std::shared_ptr<env_pack> env)
+static bool handle_message(::listener& con, struct config* config, const std::shared_ptr<env_pack>& env)
 {
 	struct ipc_message msg;
 	if (!xread(con, &msg, sizeof(msg))) {
@@ -456,9 +452,13 @@ static bool handle_message(::listener& con, struct config* config, std::shared_p
 		msg.data[msg.sz] = 0;
 
 		for (auto& kbd : configs) {
-			kbd->config.cfg_use_uid = config->cfg_use_uid;
-			kbd->config.cfg_use_gid = config->cfg_use_gid;
-			kbd->config.env = config->env;
+			if (kbd->config.cmd_env && config->cmd_env && kbd->config.cmd_env != config->cmd_env) {
+				// Assign only if objects differ
+				if (*kbd->config.cmd_env != *config->cmd_env)
+					kbd->config.cmd_env = config->cmd_env;
+			} else {
+				kbd->config.cmd_env = config->cmd_env;
+			}
 			success |= kbd_eval(kbd.get(), msg.data);
 		}
 
@@ -490,11 +490,6 @@ static bool handle_message(::listener& con, struct config* config, std::shared_p
 		return;
 
 	::config ephemeral_config;
-	ephemeral_config.cfg_use_gid = cred.gid;
-	ephemeral_config.cfg_use_uid = cred.uid;
-	static std::shared_ptr<env_pack> prev = nullptr;
-	if (!prev || prev->uid != cred.uid || prev->gid != cred.gid)
-		prev.reset();
 	if (getuid() < 1000)
 	{
 		// Copy initial environment variables from caller process
@@ -502,28 +497,23 @@ static bool handle_message(::listener& con, struct config* config, std::shared_p
 			perror("environ");
 		});
 		if (!buf.empty()) {
-			if (prev && prev->buf == buf) {
-				// Share previous environment variables
-				ephemeral_config.env = prev;
-			} else {
-				size_t count = std::count(buf.begin(), buf.end(), 0);
-				auto env = std::make_unique<const char*[]>(count + 1);
-				auto ptr = env.get();
-				for (auto str : split_char<0>({buf.data(), buf.size() - 1}))
-					*ptr++ = str.data();
-				*ptr = nullptr;
-				prev = ephemeral_config.env = std::make_shared<env_pack>(::env_pack{
-					.buf = std::move(buf),
-					.env = std::move(env),
-					.uid = cred.uid,
-					.gid = cred.gid,
-				});
-			}
+			size_t count = std::count(buf.begin(), buf.end(), 0);
+			auto env = std::make_unique<const char*[]>(count + 1);
+			auto ptr = env.get();
+			for (auto str : split_char<0>({buf.data(), buf.size() - 1}))
+				*ptr++ = str.data();
+			*ptr = nullptr;
+			ephemeral_config.cmd_env = std::make_shared<env_pack>(::env_pack{
+				.buf = std::move(buf),
+				.env = std::move(env),
+				.uid = cred.uid,
+				.gid = cred.gid,
+			});
 		}
 	}
 
-	size_t msg_count = 0;
-	while (handle_message(con, &ephemeral_config, prev ? prev : std::make_shared<env_pack>())) {
+	size_t msg_count = 1;
+	while (handle_message(con, &ephemeral_config, ephemeral_config.cmd_env)) {
 		ephemeral_config.commands.clear();
 		msg_count++;
 	}
@@ -692,7 +682,7 @@ int run_daemon(int, char *[])
 
 	evloop_add_fd(ipcfd);
 
-	reload(std::make_shared<env_pack>());
+	reload(nullptr);
 
 	atexit(cleanup);
 

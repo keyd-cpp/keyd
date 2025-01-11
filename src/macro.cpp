@@ -42,10 +42,8 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 			if (is_cmd) {
 				ADD_ENTRY(MACRO_COMMAND, config->commands.size());
 				config->commands.emplace_back(::ucmd{
-					.uid = config->cfg_use_uid,
-					.gid = config->cfg_use_gid,
 					.cmd = std::move(buf),
-					.env = config->env,
+					.env = config->cmd_env,
 				});
 			} else {
 				uint32_t codepoint;

@@ -5,14 +5,12 @@
  */
 
 #include <assert.h>
-#include <fcntl.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <fcntl.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <libgen.h>
@@ -1135,6 +1133,7 @@ config_backup::config_backup(const struct config& cfg)
 	, cmd_count(cfg.macros.size())
 	, layers(cfg.layers.size())
 	, mods(cfg.modifiers)
+	, _env(cfg.cmd_env)
 {
 	for (size_t i = 0; i < layers.size(); i++) {
 		layers[i] = {
@@ -1162,6 +1161,7 @@ void config_backup::restore(struct keyboard* kbd)
 	cfg.macros.resize(macro_count);
 	cfg.commands.resize(cmd_count);
 	cfg.modifiers = this->mods;
+	cfg.cmd_env = this->_env;
 }
 
 config::config()

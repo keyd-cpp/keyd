@@ -16,9 +16,16 @@ static void chgid()
 {
 	struct group gb{};
 	struct group* g = nullptr;
-
-	// Can parse /etc/group but probably unnecessary
-	// file_mapper groups(open("/etc/group", O_RDONLY));
+	{
+		file_mapper groups(open("/etc/group", O_RDONLY));
+		for (auto str : split_char<'\n'>(groups.view())) {
+			if (str.starts_with("keyd:x:")) {
+				g = &gb;
+				gb.gr_gid = atoi(str.data() + 7);
+				break;
+			}
+		}
+	}
 
 	if (!g) {
 		// Attempt to use dummy stack buffer, then fallback to getgrnam if it fails

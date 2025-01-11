@@ -486,11 +486,11 @@ void execute_command(ucmd& cmd)
 		return;
 	}
 
-	if (setgid(cmd.gid) < 0) {
+	if (cmd.env && cmd.env->gid && setgid(cmd.env->gid) < 0) {
 		perror("setgid");
 		exit(-1);
 	}
-	if (setuid(cmd.uid) < 0) {
+	if (cmd.env && cmd.env->uid && setuid(cmd.env->uid) < 0) {
 		perror("setuid");
 		exit(-1);
 	}
@@ -957,8 +957,6 @@ std::unique_ptr<keyboard> new_keyboard(std::unique_ptr<keyboard> kbd)
 	kbd->update_layer_state();
 	kbd->layer_state[0].active_s = 1;
 	kbd->layer_state[0].activation_time = 0;
-	kbd->config.cfg_use_uid = getuid();
-	kbd->config.cfg_use_gid = getuid(); // match uid
 
 	if (!kbd->config.default_layout.empty() && kbd->config.default_layout != kbd->config.layers[0].name) {
 		int found = 0;

@@ -7,7 +7,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/ioctl.h>
-#include <fcntl.h>
 #include <unistd.h>
 #include <time.h>
 #include <utility>
@@ -41,19 +40,11 @@ struct vkbd {
 
 	void send_kbd_event(int fd_type, uint16_t type, uint16_t code, int32_t value)
 	{
-		struct input_event ev[2];
-		ev[0] = {
-			.time = {},
-			.type = type,
-			.code = code,
-			.value = value,
-		};
-		ev[1] = {
-			.time = {},
-			.type = EV_SYN,
-			.code = 0,
-			.value = 0,
-		};
+		struct input_event ev[2]{};
+		ev[0].type = type;
+		ev[0].code = code;
+		ev[0].value = value;
+		ev[1].type = EV_SYN;
 
 		// 0 = kbd, 1 = ptr, 2+ unimplemented
 		if (fd_type == 0)
