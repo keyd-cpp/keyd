@@ -10,7 +10,8 @@ keyd++ is a C++ fork of keyd and has specific features at the moment:
 
 - **Wildcard bindings**: `**numlock = **pause` replaces keyd's `numlock = pause`.
 - **Precise bindings**: explicit left-hand modifiers `M-f = x` or absence thereof.
-- Rebind **any** key by its number like `key_333`. Was not possible in keyd.
+- Rebind **any** key by its number like `key_333`. May improve forward compatibility.
+- **Implicit macro** like M-f now tries to behave like a normal key binding (not a tap).
 - **Macro** can now do `type(Hello world)` without worrying about spaces.
 - Bound **Macro** can now do `cmd(gnome-terminal)` and it should **just work**.
 - Wildcard for mice `m:` that excludes problematic abs ptr devices(`a:`).
@@ -58,8 +59,9 @@ keyd++ is a C++ fork of keyd and has specific features at the moment:
 
 # Dependencies
 
- - C++20 compiler starting from clang++-14 or g++-11
+ - C++20 compiler starting from clang++-14 or g++-11 (can use cross-compiler)
  - Linux kernel headers (already present on most systems)
+ - Runtime dependency glibc>=2.17 but can be built against Musl C library
 
 ## Optional
 
@@ -79,8 +81,8 @@ sudo apt install build-essentials git
 # Clone with git clone or download sources manually to keyd directory
 git clone https://github.com/keyd-cpp/keyd.git
 cd keyd
-# Specify your favourite compiler (optional)
-export CXX=clang++-18
+# Specify your favourite compiler and options (optional)
+export CXX=clang++-18 CXXFLAGS=-s
 # First time install
 make && sudo make install && sudo systemctl enable --now keyd
 # Second time install (update example)
@@ -103,6 +105,8 @@ k:*
 
 # Remaps numlock with any modifier to pause/break keeping modifiers
 **numlock = **pause
+# Access numlock itself via Super+Numlock
+M-numlock = numlock
 
 # Maps capslock to escape when pressed and control when held.
 capslock = overload(control, esc)
