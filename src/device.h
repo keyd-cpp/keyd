@@ -66,7 +66,7 @@ struct device_event {
 
 struct device_event *device_read_event(struct device *dev);
 
-void device_scan(std::vector<device>& devices);
+size_t device_scan(std::array<device, 128>& devices);
 int device_grab(struct device *dev);
 int device_ungrab(struct device *dev);
 

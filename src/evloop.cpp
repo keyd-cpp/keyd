@@ -1,7 +1,10 @@
 #include "keyd.h"
 
 static int aux_fd = -1;
-std::vector<device> device_table;
+
+// Expected to be initialized as zeros
+// Expected to terminate if fd 0 or -1
+std::array<device, 128> device_table{};
 
 static void panic_check(uint16_t code, uint8_t pressed)
 {
@@ -31,18 +34,18 @@ static int64_t get_time_ms()
 
 int evloop(int (*event_handler) (struct event *ev))
 {
-	size_t i;
+	size_t n_dev;
 	int timeout = 0;
 	int monfd;
 
-	struct pollfd pfds[130]{}; // TODO: fix hard limit but calling poll with too many descriptors is inefficient anyway
+	struct pollfd pfds[device_table.size() + 3]{};
 
 	struct event ev{};
 
 	monfd = devmon_create();
-	device_scan(device_table);
+	n_dev = device_scan(device_table);
 
-	for (i = 0; i < device_table.size(); i++) {
+	for (size_t i = 0; i < n_dev; i++) {
 		ev.type = EV_DEV_ADD;
 		ev.dev = &device_table[i];
 
@@ -50,7 +53,7 @@ int evloop(int (*event_handler) (struct event *ev))
 	}
 
 	bool monitor = true;
-	for (i = 0; i < device_table.size(); i++) {
+	for (size_t i = 0; i < n_dev; i++) {
 		if (device_table[i].grabbed) {
 			monitor = false;
 			break;
@@ -71,10 +74,7 @@ int evloop(int (*event_handler) (struct event *ev))
 		int64_t start_time;
 		int64_t elapsed;
 
-		for (i = 0; i < device_table.size(); i++) {
-			if (i == std::size(pfds) - (pfdsd - pfds)) {
-				break;
-			}
+		for (size_t i = 0; i < n_dev; i++) {
 			pfdsd[i].fd = device_table[i].fd;
 			pfdsd[i].events = 0;
 			if (monitor || device_table[i].grabbed)
@@ -84,7 +84,7 @@ int evloop(int (*event_handler) (struct event *ev))
 		}
 
 		start_time = get_time_ms();
-		poll(pfds, i + (pfdsd - pfds), timeout > 0 ? timeout : -1);
+		poll(pfds, n_dev + (pfdsd - pfds), timeout > 0 ? timeout : -1);
 		ev.timestamp = get_time_ms();
 		elapsed = ev.timestamp - start_time;
 
@@ -102,8 +102,7 @@ int evloop(int (*event_handler) (struct event *ev))
 			timeout -= elapsed;
 		}
 
-		// Count backwards
-		for (i = i - 1; ~i; i--) {
+		for (size_t i = 0; i < n_dev; i++) {
 			if (pfdsd[i].revents) {
 				struct device_event *devev = nullptr;
 
@@ -145,24 +144,31 @@ int evloop(int (*event_handler) (struct event *ev))
 			struct device dev;
 
 			while (devmon_read_device(monfd, &dev) == 0) {
-				if (device_table.size() >= std::size(pfds) - 2) {
-					keyd_log("Too many devices, some of them will be ignored.");
+				if (n_dev >= device_table.size()) {
+					keyd_log("Too many devices, ignoring.");
+					close(dev.fd);
+					break;
 				}
-				device_table.emplace_back(std::move(dev));
+				device_table[n_dev] = std::move(dev);
 
 				ev.type = EV_DEV_ADD;
-				ev.dev = &device_table.back();
+				ev.dev = &device_table[n_dev];
 
 				timeout = event_handler(&ev);
+				n_dev++;
 			}
 		}
 
 		if (removed) {
-			std::erase_if(device_table, [](device& dev) {
-				return dev.fd < 0;
+			// Maintain contiguous list of devices
+			auto end = std::remove_if(device_table.begin(), device_table.begin() + n_dev, [](device& dev) {
+				return dev.fd <= 0;
 			});
+			if (end < device_table.begin() + n_dev) {
+				end->fd = -1;
+				n_dev = end - device_table.data();
+			}
 		}
-
 	}
 
 	return 0;

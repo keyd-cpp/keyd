@@ -11,7 +11,7 @@
 static int ipcfd = -1;
 static std::shared_ptr<struct vkbd> vkbd;
 static std::vector<std::unique_ptr<keyboard>> configs;
-extern std::vector<device> device_table;
+extern std::array<device, 128> device_table;
 
 static std::bitset<KEY_CNT> keystate{};
 
@@ -55,12 +55,18 @@ private:
 	int fd = -1;
 };
 
-static std::vector<listener> listeners;
+static std::array<listener, 32> listeners;
 
 static struct keyboard *active_kbd = NULL;
 
 static void cleanup()
 {
+	for (auto& dev : device_table) {
+		if (dev.fd > 0) {
+			close(dev.fd);
+			dev.fd = -1;
+		}
+	}
 }
 
 static void clear_vkbd()
@@ -110,7 +116,15 @@ static void add_listener(::listener con)
 			}
 		}
 	}
-	listeners.emplace_back(std::move(con));
+
+	for (auto& lis : listeners) {
+		if (!lis) {
+			lis = std::move(con);
+			return;
+		}
+	}
+
+	keyd_log("Too many listeners, ignoring.");
 }
 
 static void activate_leds(const struct keyboard *kbd)
@@ -127,18 +141,23 @@ static void activate_leds(const struct keyboard *kbd)
 			break;
 		}
 
-	for (size_t i = 0; i < device_table.size(); i++)
+	for (size_t i = 0; i < device_table.size(); i++) {
+		if (device_table[i].fd <= 0)
+			break;
 		if (device_table[i].data == kbd && (device_table[i].capabilities & CAP_LEDS)) {
 			if (std::exchange(device_table[i].led_state[ind], active_layers) == active_layers)
 				continue;
 			device_set_led(&device_table[i], ind, active_layers);
 		}
+	}
 }
 
 static void restore_leds()
 {
 	for (size_t i = 0; i < device_table.size(); i++) {
 		struct device* dev = &device_table[i];
+		if (dev->fd <= 0)
+			break;
 		if (dev->grabbed && dev->data && (dev->capabilities & CAP_LEDS)) {
 			for (int j = 0; j < LED_CNT; j++) {
 				device_set_led(dev, dev->led_state[j], j);
@@ -157,16 +176,22 @@ static void on_layer_change(const struct keyboard *kbd, struct layer *layer, uin
 	if (kbd->layout != (layer - kbd->config.layers.data()))
 		c = state ? '+' : '-';
 
-	std::erase_if(listeners, [&](::listener& listener) {
+	for (auto& listener : listeners) {
+		if (listener < 0)
+			continue;
 		if (layer->name[0]) {
-			return dprintf(listener, "%c%s\n", c, layer->name.c_str()) < 0;
+			if (dprintf(listener, "%c%s\n", c, layer->name.c_str()) < 0) {
+				listener = {};
+				continue;
+			}
 		}
 		for (auto idx : *layer) {
-			if (dprintf(listener, "%c%s\n", c, kbd->config.layers[idx].name.c_str()) < 0)
-				return true;
+			if (dprintf(listener, "%c%s\n", c, kbd->config.layers[idx].name.c_str()) < 0) {
+				listener = {};
+				break;
+			}
 		}
-		return false;
-	});
+	}
 }
 
 static void load_configs()
@@ -265,8 +290,11 @@ static void reload(const std::shared_ptr<env_pack>& env)
 	restore_leds();
 	load_configs();
 
-	for (size_t i = 0; i < device_table.size(); i++)
-		manage_device(&device_table[i]);
+	for (auto& dev : device_table) {
+		if (dev.fd <= 0)
+			break;
+		manage_device(&dev);
+	}
 
 	clear_vkbd();
 
@@ -618,8 +646,9 @@ static int event_handler(struct event *ev)
 			 * Propagate LED events received by the virtual device from userspace
 			 * to all grabbed devices.
 			 */
-			for (size_t i = 0; i < device_table.size(); i++) {
-				::device& dev = device_table[i];
+			for (auto& dev : device_table) {
+				if (dev.fd <= 0)
+					break;
 				if (dev.data && (dev.capabilities & CAP_LEDS)) {
 					struct keyboard* kbd = (struct keyboard*)dev.data;
 					if (ev->devev->code <= LED_MAX) {

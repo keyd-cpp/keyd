@@ -144,6 +144,7 @@ static int device_init(struct device *dev)
 
 	capabilities = resolve_device_capabilities(fd, &num_keys, &relmask, &absmask);
 
+	memset(dev->name, 0, sizeof(dev->name));
 	if (ioctl(fd, EVIOCGNAME(sizeof(dev->name) - 1), dev->name) == -1) {
 		keyd_log("ERROR: could not fetch device name of /dev/input/event%u\n", dev->num);
 		return -1;
@@ -202,25 +203,30 @@ static int device_init(struct device *dev)
 	return -1;
 }
 
-void device_scan(std::vector<device>& devices)
+size_t device_scan(std::array<device, 128>& devices)
 {
-	assert(devices.empty());
 	DIR *dh = opendir("/dev/input/");
 	if (!dh) {
 		perror("opendir /dev/input");
 		exit(-1);
 	}
 
+	size_t n = 0;
 	while (struct dirent* ent = readdir(dh)) {
 		if (ent->d_type != DT_DIR && !memcmp(ent->d_name, "event", 5)) {
-			auto& dev = devices.emplace_back();
+			if (n >= devices.size()) {
+				keyd_log("Too many devices, ignoring.");
+				break;
+			}
+			auto& dev = devices[n];
 			dev.num = atoi(ent->d_name + 5);
-			if (device_init(&dev) < 0)
-				devices.pop_back();
+			if (device_init(&dev) >= 0)
+				n++;
 		}
 	}
 
 	closedir(dh);
+	return n;
 }
 
 /*
