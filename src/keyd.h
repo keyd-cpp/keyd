@@ -97,7 +97,7 @@ int monitor(int argc, char *argv[]);
 int run_daemon(int argc, char *argv[]);
 
 void evloop_add_fd(int fd);
-int evloop(int (*event_handler) (struct event *ev));
+int evloop(int (*event_handler)(struct event* ev), bool monitor = false);
 
 void xwrite(int fd, const void *buf, size_t sz);
 bool xread(int fd, void *buf, size_t sz);

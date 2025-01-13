@@ -215,7 +215,7 @@ size_t device_scan(std::array<device, 128>& devices)
 	while (struct dirent* ent = readdir(dh)) {
 		if (ent->d_type != DT_DIR && !memcmp(ent->d_name, "event", 5)) {
 			if (n >= devices.size()) {
-				keyd_log("Too many devices, ignoring.");
+				keyd_log("Too many devices, ignoring.\n");
 				break;
 			}
 			auto& dev = devices[n];

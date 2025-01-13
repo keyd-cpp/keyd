@@ -118,13 +118,13 @@ static void add_listener(::listener con)
 	}
 
 	for (auto& lis : listeners) {
-		if (!lis) {
+		if (lis < 0) {
 			lis = std::move(con);
 			return;
 		}
 	}
 
-	keyd_log("Too many listeners, ignoring.");
+	keyd_log("Too many listeners, ignoring.\n");
 }
 
 static void activate_leds(const struct keyboard *kbd)

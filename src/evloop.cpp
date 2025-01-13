@@ -32,7 +32,7 @@ static int64_t get_time_ms()
 	return int64_t(ts.tv_sec) * 1000 + ts.tv_nsec / 1000'000;
 }
 
-int evloop(int (*event_handler) (struct event *ev))
+int evloop(int (*event_handler)(struct event* ev), bool monitor)
 {
 	size_t n_dev;
 	int timeout = 0;
@@ -50,14 +50,6 @@ int evloop(int (*event_handler) (struct event *ev))
 		ev.dev = &device_table[i];
 
 		event_handler(&ev);
-	}
-
-	bool monitor = true;
-	for (size_t i = 0; i < n_dev; i++) {
-		if (device_table[i].grabbed) {
-			monitor = false;
-			break;
-		}
 	}
 
 	pfds[0].fd = monfd;
@@ -145,7 +137,7 @@ int evloop(int (*event_handler) (struct event *ev))
 
 			while (devmon_read_device(monfd, &dev) == 0) {
 				if (n_dev >= device_table.size()) {
-					keyd_log("Too many devices, ignoring.");
+					keyd_log("Too many devices, ignoring.\n");
 					close(dev.fd);
 					break;
 				}

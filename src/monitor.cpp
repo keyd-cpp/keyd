@@ -95,7 +95,7 @@ int monitor(int argc, char *argv[])
 
 	atexit(cleanup);
 
-	evloop(event_handler);
+	evloop(event_handler, true);
 
 	return 0;
 }
