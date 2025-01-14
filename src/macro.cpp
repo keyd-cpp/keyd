@@ -2,6 +2,38 @@
 #include "macro.h"
 #include "config.h"
 
+bool macro::equals(const struct config* cfg, const macro& b) const
+{
+	if (size != b.size)
+		return false;
+	for (size_t i = 0; i < size; i++) {
+		auto& op = (*this)[i];
+		if (op.type != b[i].type)
+			return false;
+		switch (op.type) {
+		case MACRO_KEY_SEQ:
+		case MACRO_KEY_TAP:
+		case MACRO_HOLD:
+		case MACRO_RELEASE:
+		case MACRO_UNICODE:
+		case MACRO_TIMEOUT:
+			if (memcmp(&op, &b[i], sizeof(op)) != 0)
+				return false;
+			continue;
+		case MACRO_COMMAND:
+			if (cfg->commands[op.code] != cfg->commands[b[i].code])
+				return false;
+			continue;
+		case MACRO_MAX:
+			break;
+		}
+
+		die("%s: unhandled op", __FUNCTION__);
+	}
+
+	return true;
+}
+
 /*
  * Parses expressions of the form: C-t type(hello) enter
  * Returns 0 on success.

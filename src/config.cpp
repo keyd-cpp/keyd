@@ -47,7 +47,7 @@ enum class action_arg_e : signed char {
 
 using enum action_arg_e;
 
-static struct {
+constexpr struct {
 	const char *name;
 	const char *preferred_name;
 	enum op op;
@@ -119,6 +119,57 @@ bool descriptor::operator==(const descriptor& b) const
 			if (wildcard == b.wildcard)
 				return true;
 	return false;
+}
+
+[[gnu::noinline]] bool descriptor::equals(const struct config* cfg, const descriptor& b) const
+{
+	// Deep descriptor comparison
+	// Shouldn't normally be called unless descriptor match conflicts occur
+	// It could be used to deduplicate entries at config parse phase but it may be too slow?
+	if (op == OP_NULL || !b || op != b.op || *this != b)
+		return false;
+	if (op == OP_KEYSEQUENCE) {
+		return args[0].code == b.args[0].code && args[1].mods == b.args[1].mods && args[2].wildc == b.args[2].wildc;
+	}
+	if (op == OP_MACRO) {
+		if ((args[0].code & 0x8000) != (b.args[0].code & 0x8000))
+			return false;
+		if (!cfg->macros[args[0].code & 0x7fff].equals(cfg, cfg->macros[b.args[0].code & 0x7fff]))
+			return false;
+		return true;
+	}
+	// clang++-18 actually unrolls this into switch, no loops
+	#pragma GCC unroll 999
+	for (auto [n1, n2, act, types] : actions) {
+		if (op == act) {
+			for (int i = 0; i < MAX_DESCRIPTOR_ARGS; i++) {
+				switch (types[i]) {
+				case ARG_EMPTY:
+					continue;
+				case ARG_LAYER:
+				case ARG_LAYOUT:
+				case ARG_TIMEOUT:
+				case ARG_SENSITIVITY:
+					if (memcmp(&args[i], &b.args[i], sizeof(args[0])) != 0)
+						return false;
+					continue;
+				case ARG_MACRO:
+					if ((args[i].code & 0x8000) != (b.args[i].code & 0x8000))
+						return false;
+					if (!cfg->macros[args[i].code & 0x7fff].equals(cfg, cfg->macros[b.args[i].code & 0x7fff]))
+						return false;
+					continue;
+				case ARG_DESCRIPTOR:
+					if (!cfg->descriptors[args[i].idx].equals(cfg, cfg->descriptors[b.args[i].idx]))
+						return false;
+					continue;
+				}
+			}
+			return true;
+		}
+	}
+
+	die("%s: unhandled op", __FUNCTION__);
 }
 
 void descriptor_map::sort()

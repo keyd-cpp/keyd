@@ -19,7 +19,7 @@
 #define err(fmt, ...) snprintf(errstr, sizeof(errstr), fmt, ##__VA_ARGS__);
 
 void _keyd_log(int level, const char *fmt, ...);
-void die(const char *fmt, ...);
+[[noreturn]] void die(const char *fmt, ...);
 
 extern int log_level;
 extern int suppress_colours;

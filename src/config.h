@@ -80,6 +80,9 @@ struct descriptor {
 	bool operator <(const descriptor&) const;
 	bool operator ==(const descriptor&) const;
 
+	// Full deep comparison
+	bool equals(const struct config* cfg, const descriptor& rhs) const;
+
 	explicit operator bool() const
 	{
 		return op != OP_NULL;
@@ -183,6 +186,8 @@ struct env_pack {
 struct ucmd {
 	std::string cmd;
 	std::shared_ptr<env_pack> env = nullptr;
+
+	bool operator==(const ucmd&) const = default;
 };
 
 struct dev_id {

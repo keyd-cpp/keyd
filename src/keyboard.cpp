@@ -265,6 +265,7 @@ static void lookup_descriptor(struct keyboard *kbd, uint16_t code, struct descri
 
 	size_t set = 0;
 	size_t max = 0;
+	size_t conflicts = 0;
 
 	for (size_t i = 0; i < kbd->config.layers.size(); i++) {
 		struct layer *layer = &kbd->config.layers[i];
@@ -276,8 +277,15 @@ static void lookup_descriptor(struct keyboard *kbd, uint16_t code, struct descri
 			if (act_ts < maxts)
 				continue;
 			if (auto match = layer->keymap[desc]) {
+				if (maxts < act_ts)
+					conflicts = 0;
 				maxts = act_ts;
 				max = 1;
+				// Check for conflicting matches, actual conflict discards both
+				// Deep comparison is performed to verify conflict
+				// To avoid some legitimate cases with identical ops
+				if (!conflicts || !d->equals(&kbd->config, match))
+					conflicts++;
 				*d = match;
 				*dl = i;
 			}
@@ -297,13 +305,17 @@ static void lookup_descriptor(struct keyboard *kbd, uint16_t code, struct descri
 		if (!std::includes(kbd->active_layers.begin(), kbd->active_layers.begin() + set, layer->begin(), layer->end()))
 			continue;
 		if (auto match = layer->keymap[desc]) {
+			if (max < layer->size())
+				conflicts = 0;
 			max = layer->size();
+			if (!conflicts || !d->equals(&kbd->config, match))
+				conflicts++;
 			*d = match;
 			*dl = i;
 		}
 	}
 
-	if (d->op == OP_NULL) {
+	if (d->op == OP_NULL || conflicts > 1) {
 		// If key is a registered modifier, fallback to setting layer by default
 		for (size_t i = 0; i < MAX_MOD; i++) {
 			if (kbd->config.modifiers[i].find_first_of(code) + 1) {

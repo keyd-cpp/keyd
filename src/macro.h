@@ -50,6 +50,8 @@ struct macro {
 		assert(idx < size);
 		return size == 1 ? entry : entries[idx];
 	}
+
+	bool equals(const struct config*, const macro&) const;
 };
 
 void macro_execute(void (*output)(uint16_t, uint8_t),
