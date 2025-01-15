@@ -210,7 +210,7 @@ static void load_configs()
 			continue;
 
 		auto name = concat(CONFIG_DIR "/", dirent->d_name);
-		if (name.get().ends_with(".conf")) {
+		if (name.get().ends_with(".conf") && !name.get().ends_with(".old.conf")) {
 			keyd_log("CONFIG: parsing b{%s}\n", name.c_str());
 
 			auto kbd = std::make_unique<keyboard>();
