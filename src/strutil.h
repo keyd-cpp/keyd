@@ -114,41 +114,6 @@ static constexpr split_str<-1u> split_chars(std::string_view str, const char* pa
 	return {.pat = pat, .str = str};
 }
 
-// Return owning string_view-alike thing
-template <size_t Size>
-struct concat_res {
-	char data[Size];
-	size_t size;
-	const char* c_str() const { return data; }
-	std::string_view get() const { return {data, size}; }
-};
-
-template <typename... Args, size_t Size = (1 + ... + (std::is_integral_v<Args> ? sizeof(Args) * 3 : sizeof(Args)))>
-static constexpr concat_res<Size> concat(const Args&... args) {
-	concat_res<Size> result{};
-	char* ptr = result.data;
-	([&] {
-		if constexpr (std::is_integral_v<Args>)
-			ptr = std::to_chars(ptr, ptr + sizeof(Args) * 3, args).ptr;
-		else if constexpr (std::is_array_v<Args>) {
-			const std::string_view str = std::begin(args);
-			ptr = std::copy_n(str.begin(), str.size(), ptr);
-		} else {
-			exit(-1);
-		}
-	}(), ...);
-	result.size = ptr - result.data;
-	return result;
-}
-
-template <typename T>
-static constexpr std::array<char, sizeof(T) * 2> hex(T arg) {
-	std::array<char, sizeof(T) * 2> result{};
-	if (std::to_chars(std::begin(result), std::end(result), arg, 16).ec != std::errc())
-		exit(-1);
-	return result;
-}
-
 int utf8_read_char(const char *_s, uint32_t *code);
 int utf8_read_char(std::string_view s, uint32_t& code);
 int utf8_strlen(std::string_view s);

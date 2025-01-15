@@ -14,6 +14,7 @@
 #include <string_view>
 #include <array>
 #include <map>
+#include "utils.hpp"
 
 #define MAX_DESCRIPTOR_ARGS	3
 
@@ -83,7 +84,7 @@ struct descriptor {
 	// Full deep comparison
 	bool equals(const struct config* cfg, const descriptor& rhs) const;
 
-	explicit operator bool() const
+	explicit operator bool() const noexcept
 	{
 		return op != OP_NULL;
 	}
@@ -170,8 +171,9 @@ struct layer {
 };
 
 struct env_pack {
-	std::vector<char> buf;
+	std::unique_ptr<char[]> buf;
 	std::unique_ptr<const char*[]> env;
+	size_t buf_size;
 	uid_t uid;
 	gid_t gid;
 
@@ -179,13 +181,13 @@ struct env_pack {
 
 	bool operator==(const env_pack& rhs) const
 	{
-		return uid == rhs.uid && gid == rhs.gid && buf == rhs.buf;
+		return uid == rhs.uid && gid == rhs.gid && memcmp(buf.get(), rhs.buf.get(), buf_size) == 0;
 	}
 };
 
 struct ucmd {
 	std::string cmd;
-	std::shared_ptr<env_pack> env = nullptr;
+	smart_ptr<env_pack> env;
 
 	bool operator==(const ucmd&) const = default;
 };
@@ -196,7 +198,6 @@ struct dev_id {
 };
 
 struct config {
-	std::string pathstr;
 	std::vector<layer> layers;
 	std::vector<uint16_t> layer_index;
 	std::array<std::u16string, 8> modifiers;
@@ -207,7 +208,7 @@ struct config {
 	std::vector<ucmd> commands;
 	std::map<std::string, std::vector<descriptor>, std::less<>> aliases;
 
-	std::shared_ptr<env_pack> cmd_env;
+	smart_ptr<env_pack> cmd_env;
 
 	std::vector<dev_id> ids;
 
@@ -232,6 +233,7 @@ struct config {
 	uint8_t add_right_mods = 0;
 	uint8_t add_right_wildc = 0;
 	std::string default_layout;
+	std::string pathstr;
 
 	config();
 	config(const config&) = delete;
@@ -252,7 +254,7 @@ struct config_backup {
 	// These ones are nasty
 	std::vector<layer_backup> layers;
 	decltype(config::modifiers) mods;
-	std::shared_ptr<env_pack> _env;
+	smart_ptr<env_pack> _env;
 
 	explicit config_backup(const struct config& cfg);
 	~config_backup();

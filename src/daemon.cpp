@@ -1,8 +1,8 @@
 #include "keyd.h"
 #include "log.h"
-#include <memory>
 #include <bitset>
 #include <utility>
+#include "concat.hpp"
 
 #ifndef CONFIG_DIR
 #define CONFIG_DIR ""
@@ -17,8 +17,8 @@ static std::bitset<KEY_CNT> keystate{};
 
 struct listener
 {
-	listener() = default;
-	explicit listener(int fd)
+	listener() noexcept = default;
+	explicit listener(int fd) noexcept
 		: fd(fd)
 	{
 	}
@@ -26,7 +26,7 @@ struct listener
 	listener(const listener&) = delete;
 	listener& operator=(const listener&) = delete;
 
-	listener(listener&& r)
+	listener(listener&& r) noexcept
 	{
 		if (fd != -1)
 			close(fd);
@@ -34,7 +34,7 @@ struct listener
 		r.fd = -1;
 	}
 
-	listener& operator=(listener&& r)
+	listener& operator=(listener&& r) noexcept
 	{
 		std::swap(fd, r.fd);
 		return *this;
@@ -46,9 +46,14 @@ struct listener
 			close(fd);
 	}
 
-	operator int() const
+	operator int() const noexcept
 	{
 		return fd;
+	}
+
+	explicit operator bool() const noexcept
+	{
+		return fd > 0;
 	}
 
 private:
@@ -285,7 +290,7 @@ static void manage_device(struct device *dev)
 	}
 }
 
-static void reload(const std::shared_ptr<env_pack>& env)
+static void reload(const smart_ptr<env_pack>& env)
 {
 	restore_leds();
 	load_configs();
@@ -420,7 +425,7 @@ static int input(char *buf, [[maybe_unused]] size_t sz, uint32_t timeout)
 	return 0;
 }
 
-static bool handle_message(::listener& con, struct config* config, const std::shared_ptr<env_pack>& env)
+static bool handle_message(::listener& con, struct config* config, const smart_ptr<env_pack>& env)
 {
 	struct ipc_message msg;
 	if (!xread(con, &msg, sizeof(msg))) {
@@ -521,22 +526,27 @@ static bool handle_message(::listener& con, struct config* config, const std::sh
 	if (getuid() < 1000)
 	{
 		// Copy initial environment variables from caller process
-		std::vector<char> buf = file_reader(open(concat("/proc/", cred.pid, "/environ").c_str(), O_RDONLY), 8192, [] {
+		std::vector<char> file = file_reader(open(concat("/proc/", cred.pid, "/environ").c_str(), O_RDONLY), 8192, [] {
 			perror("environ");
 		});
-		if (!buf.empty()) {
-			size_t count = std::count(buf.begin(), buf.end(), 0);
-			auto env = std::make_unique<const char*[]>(count + 1);
+		if (!file.empty()) {
+			size_t size = file.size();
+			auto buf = std::make_unique_for_overwrite<char[]>(size);
+			memcpy(buf.get(), file.data(), file.size());
+			size_t count = std::count(buf.get(), buf.get() + size, 0);
+			auto env = std::make_unique_for_overwrite<const char*[]>(count + 1);
 			auto ptr = env.get();
-			for (auto str : split_char<0>({buf.data(), buf.size() - 1}))
+			for (auto str : split_char<'\0'>({buf.get(), buf.get() + size}))
 				*ptr++ = str.data();
-			*ptr = nullptr;
-			ephemeral_config.cmd_env = std::make_shared<env_pack>(::env_pack{
+			env[count] = nullptr;
+			ephemeral_config.cmd_env = make_smart_ptr<env_pack>();
+			ephemeral_config.cmd_env[0] = ::env_pack{
 				.buf = std::move(buf),
 				.env = std::move(env),
+				.buf_size = size,
 				.uid = cred.uid,
 				.gid = cred.gid,
-			});
+			};
 		}
 	}
 
@@ -711,7 +721,7 @@ int run_daemon(int, char *[])
 
 	evloop_add_fd(ipcfd);
 
-	reload(nullptr);
+	reload({});
 
 	atexit(cleanup);
 

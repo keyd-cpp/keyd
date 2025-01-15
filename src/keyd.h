@@ -186,7 +186,7 @@ struct file_mapper
 		this->fd = fd;
 	}
 
-	explicit operator bool() const
+	explicit operator bool() const noexcept
 	{
 		return this->fd >= 0 && this->ptr;
 	}

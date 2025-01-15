@@ -11,7 +11,6 @@
 #include <unistd.h>
 #include "../keys.h"
 #include "usb-gadget.h"
-#include <memory>
 
 static uint8_t mods = 0;
 

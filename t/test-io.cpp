@@ -3,7 +3,6 @@
 #include <time.h>
 #include <sys/resource.h>
 #include "../src/keyd.h"
-#include <memory>
 #include <string>
 
 #define MAX_EVENTS 1024
