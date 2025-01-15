@@ -202,7 +202,7 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 		macro.size = 1;
 	} else {
 		macro.size = entries.size();
-		macro.entries = std::make_unique_for_overwrite<macro_entry[]>(entries.size());
+		macro.entries = make_smart_ptr<macro_entry>(entries.size());
 		memcpy(macro.entries.get(), entries.data(), sizeof(macro_entry) * entries.size());
 	}
 

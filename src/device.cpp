@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <sys/inotify.h>
 #include <numeric>
+#include "concat.hpp"
 
 /*
  * Abstract away evdev and inotify.

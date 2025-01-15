@@ -5,7 +5,6 @@
  */
 
 #include "keyd.h"
-#include <memory>
 #include <algorithm>
 
 static int64_t process_event(struct keyboard *kbd, uint16_t code, int pressed, int64_t time);

@@ -1,0 +1,209 @@
+/*
+ * Smart pointer for single-thread simple use cases.
+ * License: MIT (see also: LICENSE).
+ * © 2025 Nekotekina.
+ */
+#pragma once
+
+#include <type_traits>
+#include <cassert>
+#include <memory>
+
+using size_t = decltype(sizeof(char));
+
+// Refcounted not-so-smart pointer, either single object of non-trivial type, or an array of trivial type
+template <typename PT>
+class smart_ptr final {
+	// Can be made thread-safe by using atomic operations but it will be slower
+	unsigned& refs() const noexcept
+	{
+		return *(reinterpret_cast<unsigned*>(this->ptr) - 1);
+	}
+
+	unsigned& _size() const noexcept
+	{
+		return *(reinterpret_cast<unsigned*>(this->ptr) - 2);
+	}
+
+	template <typename TT, bool, typename... Args>
+	friend smart_ptr<TT> make_smart_ptr(size_t, const Args&...);
+
+public:
+	static constexpr bool is_sized = std::is_unbounded_array_v<PT>;
+	using T = std::conditional_t<is_sized, std::remove_extent_t<PT>, PT>;
+	static constexpr size_t cb_size = is_sized ? sizeof(int[2]) : sizeof(int);
+	static constexpr size_t cb_align = alignof(T) > cb_size ? alignof(T) : cb_size;
+
+	smart_ptr() noexcept = default;
+
+	smart_ptr(const smart_ptr& r) noexcept
+		: ptr(r.ptr)
+	{
+		if (this->ptr)
+			refs()++;
+	}
+
+	smart_ptr(smart_ptr&& r) noexcept
+		: ptr(r.ptr)
+	{
+		r.ptr = nullptr;
+	}
+
+	smart_ptr& operator=(const smart_ptr& r) noexcept
+	{
+		return *this = smart_ptr(r);
+	}
+
+	smart_ptr& operator=(smart_ptr&& r) noexcept
+	{
+		std::swap(this->ptr, r.ptr);
+		return *this;
+	}
+
+	~smart_ptr()
+	{
+		if (this->ptr && !--refs()) {
+			// This is not reverse order of construction, who cares.
+			if constexpr (is_sized) {
+				for (size_t i = 0; i < this->size(); i++)
+					this->ptr[i].~T();
+			} else {
+				this->ptr->~T();
+			}
+			::operator delete[](reinterpret_cast<std::byte*>(this->ptr) - cb_align, std::align_val_t{cb_align});
+		}
+	}
+
+	T& operator*() const noexcept
+	{
+		return *this->ptr;
+	}
+
+	T* operator->() const noexcept
+	{
+		return this->ptr;
+	}
+
+	T& operator[](size_t n) const noexcept
+	{
+		return this->ptr[n];
+	}
+
+	explicit operator bool() const noexcept
+	{
+		return this->ptr != nullptr;
+	}
+
+	T* get() const noexcept
+	{
+		return this->ptr;
+	}
+
+	size_t size() const noexcept requires(is_sized)
+	{
+		if (!this->ptr)
+			return 0;
+		return this->_size();
+	}
+
+	T* begin() const noexcept requires(is_sized)
+	{
+		return this->ptr;
+	}
+
+	T* end() const noexcept requires(is_sized)
+	{
+		return this->ptr ? this->ptr + this->size() : nullptr;
+	}
+
+	bool operator==(const smart_ptr&) const noexcept = default;
+
+private:
+	T* ptr = nullptr;
+};
+
+template <typename TT, bool Init = true, typename... Args>
+smart_ptr<TT> make_smart_ptr(size_t count = 1, const Args&... args)
+{
+	using T = smart_ptr<TT>::T;
+	if constexpr (!std::is_trivially_destructible_v<T> && !smart_ptr<TT>::is_sized)
+		assert(count == 1);
+
+	constexpr size_t cb_size = smart_ptr<TT>::cb_align;
+	constexpr size_t absurd = (size_t(0) - cb_size) / sizeof(T) - 1;
+	if (count > absurd)
+		count = absurd; // Make sure it fails without overflow
+	std::byte* bytes = static_cast<std::byte*>(::operator new[](cb_size + count * sizeof(T), std::align_val_t{cb_size}));
+	memset(bytes, 0, cb_size); // Clear control block
+	T* arr = reinterpret_cast<T*>(bytes + cb_size);
+
+	// For non-trivial objects Init arg is irrelevant
+	if constexpr (sizeof...(Args) > 0) {
+		for (size_t i = 0; i < count; i++) {
+			new(arr + i) T(args...);
+		}
+	} else if constexpr (Init)
+		std::uninitialized_value_construct_n(arr, count);
+	else
+		std::uninitialized_default_construct_n(arr, count);
+
+	smart_ptr<TT> r;
+	r.ptr = std::launder(arr);
+	r.refs()++;
+	if constexpr (smart_ptr<TT>::is_sized)
+		r._size() = count;
+	return r;
+}
+
+// Make smart_ptr "null-terminated" and initialize from src
+template <typename S>
+auto make_smart_buf(const S& src, size_t add = 1)
+{
+	using T = std::decay_t<decltype(*std::begin(src))>;
+	smart_ptr<T> r;
+	size_t sz = std::size(src) + add;
+	if (!sz)
+		return r;
+	r = make_smart_ptr<T, false>(sz);
+	size_t i = 0;
+	for (auto it = std::begin(src), end = std::end(src); it != end; it++)
+		r[i++] = *it;
+	for (; i < sz; i++)
+		r[i] = T();
+	return r;
+}
+
+// Make smart_ptr with available size() and initialize from src
+template <typename S>
+auto make_smart_array(const S& src, size_t add = 0)
+{
+	using T = std::decay_t<decltype(*std::begin(src))>;
+	smart_ptr<T[]> r;
+	size_t sz = std::size(src) + add;
+	if (!sz)
+		return r;
+	r = make_smart_ptr<T[], false>(sz);
+	size_t i = 0;
+	for (auto it = std::begin(src), end = std::end(src); it != end; it++)
+		r[i++] = *it;
+	for (; i < sz; i++)
+		r[i] = T();
+	return r;
+}
+
+template <typename S>
+auto make_buf(const S& src, size_t add = 1)
+{
+	using T = std::decay_t<decltype(*std::begin(src))>;
+	std::unique_ptr<T[]> r;
+	size_t sz = std::size(src) + add;
+	if (!sz)
+		return r;
+	r = std::make_unique_for_overwrite<T[]>(sz);
+	size_t i = 0;
+	for (auto it = std::begin(src), end = std::end(src); it != end; it++)
+		r[i++] = *it;
+	for (; i < sz; i++)
+		r[i] = T();
+	return r;
+}

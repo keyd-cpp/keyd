@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <memory>
 #include <string_view>
+#include "utils.hpp"
 
 enum class macro_e : uint16_t {
 	MACRO_KEY_SEQ = 0,
@@ -43,7 +44,7 @@ static_assert(sizeof(macro_entry) == 4);
 struct macro {
 	uint32_t size;
 	macro_entry entry;
-	std::unique_ptr<macro_entry[]> entries;
+	smart_ptr<macro_entry> entries;
 
 	const macro_entry& operator[](size_t idx) const
 	{

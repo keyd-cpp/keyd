@@ -754,7 +754,6 @@ static int parse_descriptor(std::string_view s, struct descriptor *d, struct con
 	uint8_t wildc;
 	int ret;
 	::macro macro;
-	std::string cmd;
 
 	if (s.empty()) {
 		d->op = OP_NULL;
