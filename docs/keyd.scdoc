@@ -668,9 +668,8 @@ The _bind_ command accepts one or more _bindings_, each of which must have the f
 Where _<layer>_ is the name of an (existing) layer in which the key is to be bound.
 
 As a special case, the string "reset" may be used in place of a binding, in
-which case the current keymap will revert to its last pushed state (all
+which case the current keymap will revert to its last loaded state (all
 dynamically applied bindings will be dropped).
-Commands "push" and "pop|pop_all" maintain additional layers of states.
 
 Examples:
 

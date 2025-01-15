@@ -22,7 +22,6 @@ keyd++ is a C++ fork of keyd and has specific features at the moment:
 - Some security improvement: privileged commands only run from /etc/keyd/ conf.
 - Bindings coming from ex. `keyd-application-mapper` inherit user credentials.
 - `keyd reload` from user loads user binds from `~/.config/keyd/bindings.conf`.
-- New commands for config control: push, pop, pop_all. Can unload user binds.
 - Convenience and safety coming from C++20. Sorry for longer compilation.
 - Physical keys variants (left or right) are pressed accordingly.
 - Virtually unlimited sizes/counts (keyd has had many hardcoded limitations).

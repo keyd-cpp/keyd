@@ -6,17 +6,19 @@
 
 #include "keyd.h"
 #include <link.h>
+#include <dlfcn.h>
+#include <elf.h>
 #include <charconv>
 #include <numeric>
 
 #if (defined(__GLIBCXX__) || defined(__GLIBCPP__)) && !defined(DISABLE_HACKS)
 
 #if defined(__GLIBC__)
-extern "C" void _init();
+
+static uintptr_t reloc = -1;
 
 static void call_init(int argc, char **argv, char **envp)
 {
-	uintptr_t reloc = 0;
 	decltype(&call_init) init = nullptr;
 	decltype(&call_init)* inits = nullptr;
 	size_t init_sz = 0;
@@ -24,17 +26,16 @@ static void call_init(int argc, char **argv, char **envp)
 		auto& dyn = _DYNAMIC[i];
 		if (dyn.d_tag == DT_NULL)
 			break;
-		if (dyn.d_tag == DT_INIT) {
-			// Use _init symbol to detect self location in memory
-			reloc = uintptr_t(&_init) - dyn.d_un.d_ptr;
-			init = decltype(init)(dyn.d_un.d_ptr + reloc);
+		if (dyn.d_tag == DT_DEBUG) {
+			auto dbg = (struct r_debug_extended*)dyn.d_un.d_ptr;
+			reloc = dbg->base.r_map->l_addr;
 		}
 		if (dyn.d_tag == DT_INIT_ARRAYSZ) {
 			init_sz = dyn.d_un.d_val / sizeof(&call_init);
 		}
 	}
 
-	if (!reloc) {
+	if (reloc == uintptr_t(-1)) {
 		fprintf(stderr, "Failed to locate self, exiting.\n");
 		exit(-1);
 	}
@@ -72,11 +73,42 @@ extern "C" int __libc_start_main(int (*main)(int, char **, char **), int argc, c
 	call_init(argc, argv, __environ);
 	exit(main(argc, argv, __environ));
 }
-#endif /* __GLIBC__ */
+
+#if !DLFO_STRUCT_HAS_EH_COUNT
+extern "C" int _dl_find_object(void*, struct dl_find_object* res)
+{
+	// Try to find .eh_frame in self
+	for (size_t i = 0;; i++) {
+		auto& dyn = _DYNAMIC[i];
+		if (dyn.d_tag == DT_NULL)
+			break;
+		if (dyn.d_tag == DT_DEBUG) {
+			auto dbg = (struct r_debug_extended*)dyn.d_un.d_ptr;
+			res->dlfo_link_map = dbg->base.r_map;
+			auto elf = (ElfW(Ehdr)*)reloc;
+			auto phnum = elf->e_phnum;
+			auto phoff = elf->e_phoff;
+			auto hdr = (ElfW(Phdr)*)(reloc + phoff);
+			for (size_t i = 0; i < phnum; i++) {
+				if (hdr[i].p_type == DLFO_EH_SEGMENT_TYPE) {
+					res->dlfo_flags = 0;
+					res->dlfo_eh_frame = (void*)(reloc + hdr[i].p_vaddr);
+					// It's not accurate, it's just addr should fit inside
+					res->dlfo_map_start = (void*)(reloc);
+					res->dlfo_map_end = (void*)(+_DYNAMIC);
+					return 0;
+				}
+			}
+			break;
+		}
+	}
+	return -1;
+}
+#endif
 
 extern "C" {
 	// I don't know how it will behave if we use threads. Just set it to 0 in that case maybe.
-	__attribute__((weak)) char __libc_single_threaded = 1;
+	char __libc_single_threaded = 1;
 }
 
 // Seems unused but bumps GLIBC requirement
@@ -209,21 +241,9 @@ extern "C" unsigned long long __isoc23_strtoull(const char *__restrict nptr, cha
 	return isoc23_strto<unsigned long long>(nptr, endptr, base);
 }
 
+#endif /* __GLIBC__ */
+
 #endif /* libstdc++ hacks */
-
-namespace __cxxabiv1 {
-	// Probably makes __cxa_demangle unnecessary
-	extern const auto __terminate_handler = abort;
-}
-
-// Emulate verbose terminate caller but avoid libunwind (libgcc_eh.a replaced with dummy)
-// Removing libunwind also reduces GLIBC requirements
-extern "C" void __wrap___cxa_throw(void* ex, std::type_info* tinfo, void (*)(void*))
-{
-	// Assume only std::exception descendants are thrown
-	fprintf(stderr, "Thrown exception of type %s\n\twhat(): %s\n", tinfo->name(), static_cast<std::exception*>(ex)->what());
-	abort();
-}
 
 extern "C" char* __cxa_demangle(const char* mangled_name, char* output_buffer, size_t* length, int* status)
 {
