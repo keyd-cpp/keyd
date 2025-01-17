@@ -94,15 +94,10 @@ static_assert(sizeof(descriptor) == 10);
 
 // Experimental flat map with deferred sorting for layer keymap descriptors
 struct descriptor_map {
-	// uint8_t size = 0;
-	// static constexpr uint8_t unsorted = -1;
-	// static constexpr uint8_t dynamic = -2;
-	// std::array<descriptor, 3> maps{};
-
 	std::vector<descriptor> mapv; // Should be empty by default
 
 	void sort();
-	void set(const descriptor& copy, uint32_t hint = 48);
+	void set(const descriptor& copy, bool sorted);
 	const descriptor& operator[](const descriptor&) const;
 
 	bool empty() const { return mapv.empty(); }
@@ -186,7 +181,7 @@ struct env_pack {
 };
 
 struct ucmd {
-	std::string cmd;
+	smart_ptr<char> cmd;
 	smart_ptr<env_pack> env;
 
 	bool operator==(const ucmd&) const = default;
@@ -222,7 +217,8 @@ struct config {
 	int64_t chord_interkey_timeout;
 	int64_t chord_hold_timeout;
 
-	uint8_t compat = 0;
+	bool compat : 1 = false;
+	bool finalized : 1 = false;
 	uint8_t wildcard = 0;
 	uint8_t layer_indicator = 255;
 	uint8_t disable_modifier_guard = 0;
@@ -235,6 +231,8 @@ struct config {
 	std::string default_layout;
 	std::string pathstr;
 
+	void finalize() noexcept;
+
 	config();
 	config(const config&) = delete;
 	config& operator=(const config&) = delete;
@@ -243,8 +241,8 @@ struct config {
 
 struct config_backup {
 	struct layer_backup {
-		decltype(layer::keymap) keymap;
-		decltype(layer::chords) chords;
+		smart_ptr<descriptor[]> keymap;
+		smart_ptr<chord[]> chords;
 	};
 
 	// These are append-only
@@ -252,7 +250,7 @@ struct config_backup {
 	size_t macro_count;
 	size_t cmd_count;
 	// These ones are nasty
-	std::vector<layer_backup> layers;
+	smart_ptr<layer_backup[]> layers;
 	decltype(config::modifiers) mods;
 	smart_ptr<env_pack> _env;
 

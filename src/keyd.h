@@ -90,7 +90,7 @@ struct ipc_message {
 
 	uint32_t timeout;
 	char data[MAX_IPC_MESSAGE_SIZE];
-	size_t sz;
+	uint64_t sz;
 };
 
 int monitor(int argc, char *argv[]);

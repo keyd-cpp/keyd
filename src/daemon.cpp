@@ -15,6 +15,10 @@ extern std::array<device, 128> device_table;
 
 static std::bitset<KEY_CNT> keystate{};
 
+void* aux_ss_head = nullptr;
+size_t aux_ss_count = 0;
+size_t aux_ss_size = 0;
+
 struct listener
 {
 	listener() noexcept = default;
@@ -68,6 +72,12 @@ static void cleanup()
 {
 	for (auto& dev : device_table) {
 		if (dev.fd > 0) {
+			if (auto kbd = (struct keyboard*)dev.data) {
+				if (auto led = kbd->config.layer_indicator; led < LED_CNT) {
+					dev.led_state[led] = 0;
+				}
+			}
+			device_ungrab(&dev);
 			close(dev.fd);
 			dev.fd = -1;
 		}
@@ -157,20 +167,6 @@ static void activate_leds(const struct keyboard *kbd)
 	}
 }
 
-static void restore_leds()
-{
-	for (size_t i = 0; i < device_table.size(); i++) {
-		struct device* dev = &device_table[i];
-		if (dev->fd <= 0)
-			break;
-		if (dev->grabbed && dev->data && (dev->capabilities & CAP_LEDS)) {
-			for (int j = 0; j < LED_CNT; j++) {
-				device_set_led(dev, dev->led_state[j], j);
-			}
-		}
-	}
-}
-
 static void on_layer_change(const struct keyboard *kbd, struct layer *layer, uint8_t state)
 {
 	if (kbd->config.layer_indicator) {
@@ -208,8 +204,6 @@ static void load_configs()
 		exit(-1);
 	}
 
-	configs.clear();
-
 	while (struct dirent* dirent = readdir(dh)) {
 		if (dirent->d_type == DT_DIR)
 			continue;
@@ -224,11 +218,7 @@ static void load_configs()
 					.send_key = send_key,
 					.on_layer_change = on_layer_change,
 				};
-				kbd = new_keyboard(std::move(kbd));
-				kbd->original_config.reserve(2);
-				kbd->original_config.emplace_back(kbd->config);
-
-				configs.emplace_back(std::move(kbd));
+				configs.emplace_back(new_keyboard(std::move(kbd)));
 			} else {
 				keyd_log("DEVICE: y{WARNING} failed to parse %s\n", name.c_str());
 			}
@@ -290,9 +280,28 @@ static void manage_device(struct device *dev)
 	}
 }
 
-static void reload(const smart_ptr<env_pack>& env)
+[[gnu::noinline]] static void reload(const smart_ptr<env_pack>& env) noexcept
 {
-	restore_leds();
+	for (auto& dev : device_table) {
+		if (dev.fd > 0) {
+			if (auto kbd = (struct keyboard*)dev.data) {
+				if (auto led = kbd->config.layer_indicator; led < LED_CNT) {
+					dev.led_state[led] = 0;
+					device_set_led(&dev, led, 0);
+				}
+			}
+		}
+	}
+
+	configs.clear();
+	if (aux_alloc aux; aux.get_head() && aux.get_count()) {
+		fprintf(stderr, "Aux heap not cleared, exiting.\n");
+		exit(-1);
+	}
+	aux_ss_head = nullptr;
+	aux_ss_count = 0;
+	aux_ss_size = 0;
+
 	load_configs();
 
 	for (auto& dev : device_table) {
@@ -305,30 +314,34 @@ static void reload(const smart_ptr<env_pack>& env)
 
 	if (env && env->uid >= 1000) {
 		// Load user bindings (may be not loaded when executed as root)
-		std::string buf;
+		const_string buf;
+		const auto name = "/keyd/bindings.conf";
 		if (auto v = env->getenv("XDG_CONFIG_HOME"))
-			buf.assign(v) += "/";
+			buf = concat(v, name);
 		else if (auto v = env->getenv("HOME"))
-			buf.assign(v) += "/.config/";
+			buf = concat(v, "/.config", name);
 		else
-			buf.clear();
-		buf += "keyd/bindings.conf";
+			buf = concat(".", name);
 		file_mapper file(open(buf.c_str(), O_RDONLY));
 		if (!file) {
 			keyd_log("Unable to open %s\n", buf.c_str());
-			return;
 		}
 
 		for (auto& kbd : configs) {
 			kbd->config.cmd_env = env;
 			for (auto str : split_char<'\n'>(file.view())) {
-				if (str.empty())
+				if (str.empty() || str == "reset")
 					continue;
 				if (!kbd_eval(kbd.get(), str))
 					keyd_log("Invalid binding: %.*s\n", (int)str.size(), str.data());
 			}
-			kbd->original_config.emplace_back(kbd->config);
+			kbd->update_layer_state();
 		}
+	}
+
+	// Finalize configs
+	for (auto& kbd : configs) {
+		kbd->config.finalize();
 	}
 }
 
@@ -425,12 +438,16 @@ static int input(char *buf, [[maybe_unused]] size_t sz, uint32_t timeout)
 	return 0;
 }
 
-static bool handle_message(::listener& con, struct config* config, const smart_ptr<env_pack>& env)
+static bool handle_message(::listener& con, const smart_ptr<env_pack>& cmd_env)
 {
 	struct ipc_message msg;
 	if (!xread(con, &msg, sizeof(msg))) {
 		// Disconnected
 		return false;
+	}
+	if constexpr (std::endian::native == std::endian::big) {
+		msg.sz = __builtin_bswap64(msg.sz);
+		msg.timeout = __builtin_bswap64(msg.timeout);
 	}
 
 	if (msg.sz >= sizeof(msg.data)) {
@@ -444,23 +461,21 @@ static bool handle_message(::listener& con, struct config* config, const smart_p
 		return false;
 	}
 
-	::macro macro;
 	switch (msg.type) {
-		int success;
-
-	case IPC_MACRO:
+	case IPC_MACRO: {
 		while (msg.sz && msg.data[msg.sz-1] == '\n')
 			msg.data[--msg.sz] = 0;
 
-		if (macro_parse(msg.data, macro, config)) {
+		::macro macro;
+		if (macro_parse(msg.data, macro, nullptr, cmd_env)) {
 			send_fail(con, "%s", errstr);
 			break;
 		}
 
-		macro_execute(send_key, macro, msg.timeout, config);
+		macro_execute(send_key, macro, msg.timeout, nullptr);
 		send_success(con);
-
 		break;
+	}
 	case IPC_INPUT:
 		if (input(msg.data, msg.sz, msg.timeout))
 			send_fail(con, "%s", errstr);
@@ -468,31 +483,63 @@ static bool handle_message(::listener& con, struct config* config, const smart_p
 			send_success(con);
 		break;
 	case IPC_RELOAD:
-		reload(std::move(env));
+		reload(cmd_env);
 		send_success(con);
 		break;
 	case IPC_LAYER_LISTEN:
 		add_listener(std::move(con));
 		return false;
-	case IPC_BIND:
-		success = 0;
+	case IPC_BIND: {
+		int success = 0;
 
 		if (msg.sz == sizeof(msg.data)) {
 			send_fail(con, "bind expression size exceeded");
 			break;
 		}
 
-		msg.data[msg.sz] = 0;
+		if (configs.empty()) {
+			send_fail(con, "No configs found");
+			break;
+		}
+
+		std::string_view expr(msg.data, msg.sz);
+
+		// Lazily make config backups
+		if (aux_alloc aux; !configs[0]->backup) {
+			for (auto& kbd : configs) {
+				kbd->backup = std::make_unique<config_backup>(kbd->config);
+			}
+
+			aux_ss_head = aux.get_head();
+			aux_ss_size = aux.get_size();
+			aux_ss_count = aux.get_count();
+		}
 
 		for (auto& kbd : configs) {
-			if (kbd->config.cmd_env && config->cmd_env && kbd->config.cmd_env != config->cmd_env) {
+			if (kbd->config.cmd_env && cmd_env && kbd->config.cmd_env != cmd_env) {
 				// Assign only if objects differ
-				if (*kbd->config.cmd_env != *config->cmd_env)
-					kbd->config.cmd_env = config->cmd_env;
+				if (*kbd->config.cmd_env != *cmd_env)
+					kbd->config.cmd_env = cmd_env;
 			} else {
-				kbd->config.cmd_env = config->cmd_env;
+				kbd->config.cmd_env = cmd_env;
 			}
-			success |= kbd_eval(kbd.get(), msg.data);
+			success |= kbd_eval(kbd.get(), expr);
+		}
+
+		// Restore aux heap if necessary
+		if (expr == "reset" || expr == "unbind_all") {
+			if (aux_alloc aux; aux_ss_head) {
+				if (aux.get_count() != aux_ss_count) {
+					fprintf(stderr, "Aux heap snapshot check failed (%zu, %zu)\n", aux.get_count(), aux_ss_count);
+					throw std::bad_alloc();
+				}
+
+				aux.shrink(aux_ss_head, aux.get_size(), aux_ss_size);
+			}
+		}
+
+		for (auto& kbd : configs) {
+			kbd->update_layer_state();
 		}
 
 		if (success)
@@ -502,6 +549,7 @@ static bool handle_message(::listener& con, struct config* config, const smart_p
 
 		// Repeat
 		return true;
+	}
 	default:
 		send_fail(con, "Unknown command");
 		break;
@@ -510,7 +558,7 @@ static bool handle_message(::listener& con, struct config* config, const smart_p
 	return false;
 }
 
-[[gnu::noinline]] static void handle_client(int fd)
+[[gnu::noinline]] static void handle_client(int fd) noexcept
 {
 	if (fd < 0) {
 		perror("accept");
@@ -522,8 +570,9 @@ static bool handle_message(::listener& con, struct config* config, const smart_p
 	if (getsockopt(con, SOL_SOCKET, SO_PEERCRED, &cred, &ucred_len) < 0)
 		return;
 
-	::config ephemeral_config;
-	if (getuid() < 1000)
+try {
+	smart_ptr<env_pack> cmd_env;
+	if (getuid() != cred.uid || getgid() != cred.gid)
 	{
 		// Copy initial environment variables from caller process
 		std::vector<char> file = file_reader(open(concat("/proc/", cred.pid, "/environ").c_str(), O_RDONLY), 8192, [] {
@@ -539,8 +588,8 @@ static bool handle_message(::listener& con, struct config* config, const smart_p
 			for (auto str : split_char<'\0'>({buf.get(), buf.get() + size}))
 				*ptr++ = str.data();
 			env[count] = nullptr;
-			ephemeral_config.cmd_env = make_smart_ptr<env_pack>();
-			ephemeral_config.cmd_env[0] = ::env_pack{
+			cmd_env = make_smart_ptr<env_pack>();
+			cmd_env[0] = ::env_pack{
 				.buf = std::move(buf),
 				.env = std::move(env),
 				.buf_size = size,
@@ -551,11 +600,18 @@ static bool handle_message(::listener& con, struct config* config, const smart_p
 	}
 
 	size_t msg_count = 1;
-	while (handle_message(con, &ephemeral_config, ephemeral_config.cmd_env)) {
-		ephemeral_config.commands.clear();
+	while (handle_message(con, cmd_env)) {
 		msg_count++;
 	}
 	dbg2("%zu messages processed", msg_count);
+
+} catch (const std::bad_alloc&) {
+	// Emergency reload, no credentials used
+	// There might be some more complicated logic, like reloading on bind reset
+	// Probably not necessary, and may be very hard to test
+	reload({});
+	send_fail(con, "out of memory, reloaded");
+}
 }
 
 static int event_handler(struct event *ev)

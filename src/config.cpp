@@ -177,7 +177,7 @@ void descriptor_map::sort()
 	std::sort(mapv.begin(), mapv.end());
 }
 
-void descriptor_map::set(const descriptor& copy, uint32_t hint)
+void descriptor_map::set(const descriptor& copy, bool sorted)
 {
 	const auto found = std::find(mapv.begin(), mapv.end(), copy);
 	if (found != mapv.end()) {
@@ -189,8 +189,12 @@ void descriptor_map::set(const descriptor& copy, uint32_t hint)
 		return;
 	}
 
-	mapv.reserve(hint);
-	mapv.emplace_back(copy);
+	auto pos = mapv.end();
+	if (sorted) {
+		// If already sorted, find exact insert position
+		pos = std::lower_bound(mapv.begin(), mapv.end(), copy);
+	}
+	mapv.emplace(pos, copy);
 }
 
 const descriptor& descriptor_map::operator[](const descriptor& copy) const
@@ -485,10 +489,10 @@ static bool set_layer_entry(struct config *config, int16_t idx, std::string_view
 				if (desc.id >= KEYD_ENTRY_COUNT) {
 					for (uint16_t id : config->modifiers.at(desc.id - KEYD_ENTRY_COUNT)) {
 						desc.id = id;
-						layer->keymap.set(desc);
+						layer->keymap.set(desc, config->finalized);
 					}
 				} else {
-					layer->keymap.set(desc);
+					layer->keymap.set(desc, config->finalized);
 				}
 			}
 		} else {
@@ -507,10 +511,10 @@ static bool set_layer_entry(struct config *config, int16_t idx, std::string_view
 			if (desc.id >= KEYD_ENTRY_COUNT) {
 				for (uint16_t id : config->modifiers.at(desc.id - KEYD_ENTRY_COUNT)) {
 					desc.id = id;
-					layer->keymap.set(desc);
+					layer->keymap.set(desc, config->finalized);
 				}
 			} else {
-				layer->keymap.set(desc);
+				layer->keymap.set(desc, config->finalized);
 			}
 		}
 
@@ -741,7 +745,7 @@ static int parse_macro_expression(std::string_view s, macro& macro, struct confi
 		warn("Naked unicode is deprecated, use type(): %.*s", (int)s.size(), s.data());
 	}
 
-	return macro_parse(s, macro, config) == 0 ? 0 : 1;
+	return macro_parse(s, macro, config, config->cmd_env) == 0 ? 0 : 1;
 }
 
 static int parse_descriptor(std::string_view s, struct descriptor *d, struct config *config)
@@ -1103,13 +1107,6 @@ bool config_parse(struct config *config, const char *path)
 		return false;
 	}
 
-	for (auto& layer : config->layers) {
-		layer.keymap.sort();
-		// TODO: report unreachable layers
-		if (layer.keymap.empty() && layer.chords.empty()) {
-		}
-	}
-
 	config->add_right_wildc = 0;
 	config->add_right_mods = 0;
 	config->add_left_wildc = 0;
@@ -1181,15 +1178,13 @@ config_backup::config_backup(const struct config& cfg)
 	: descriptor_count(cfg.descriptors.size())
 	, macro_count(cfg.macros.size())
 	, cmd_count(cfg.commands.size())
-	, layers(cfg.layers.size())
+	, layers(make_smart_ptr<layer_backup[]>(cfg.layers.size()))
 	, mods(cfg.modifiers)
 	, _env(cfg.cmd_env)
 {
 	for (size_t i = 0; i < layers.size(); i++) {
-		layers[i] = {
-			.keymap = cfg.layers[i].keymap,
-			.chords = cfg.layers[i].chords,
-		};
+		layers[i].keymap = make_smart_array(cfg.layers[i].keymap.mapv);
+		layers[i].chords = make_smart_array(cfg.layers[i].chords);
 	}
 }
 
@@ -1198,10 +1193,8 @@ void config_backup::restore(struct keyboard* kbd)
 	::config& cfg = kbd->config;
 	for (size_t i = 0; i < layers.size(); i++) {
 		auto& layer = cfg.layers[i];
-		if (true /* modified */) {
-			layer.chords = layers[i].chords;
-			layer.keymap = layers[i].keymap;
-		}
+		layer.chords.assign(layers[i].chords.begin(), layers[i].chords.end());
+		layer.keymap.mapv.assign(layers[i].keymap.begin(), layers[i].keymap.end());
 	}
 	std::erase_if(cfg.layer_index, [&](uint16_t idx) {
 		return idx >= layers.size();
@@ -1212,6 +1205,15 @@ void config_backup::restore(struct keyboard* kbd)
 	cfg.commands.resize(cmd_count);
 	cfg.modifiers = this->mods;
 	cfg.cmd_env = this->_env;
+}
+
+void config::finalize() noexcept
+{
+	for (auto& layer : layers) {
+		layer.keymap.sort();
+		// TODO: report unreachable layers
+	}
+	finalized = true;
 }
 
 config::config()

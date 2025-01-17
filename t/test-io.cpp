@@ -247,6 +247,10 @@ static void on_layer_change(const struct keyboard *kbd, struct layer *layer, uin
 {
 }
 
+void aux_alloc::shrink(void*, size_t, size_t) noexcept
+{
+}
+
 int main(int argc, char *argv[])
 {
 	rlimit lim{rlim_t(-1), rlim_t(-1)};
@@ -280,6 +284,7 @@ int main(int argc, char *argv[])
 	}
 
 	kbd = new_keyboard(std::move(kbd));
+	kbd->config.finalize();
 
 	for (i = 2; i < argc; i++)
 		total_time += run_test(kbd.get(), argv[i]);

@@ -63,9 +63,9 @@ struct active_chord {
 
 /* May correspond to more than one physical input device. */
 struct keyboard {
-	std::vector<config_backup> original_config;
 	struct config config;
 	struct output output;
+	std::unique_ptr<config_backup> backup;
 
 	/*
 	 * Cache descriptors to preserve code->descriptor

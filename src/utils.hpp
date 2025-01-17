@@ -1,5 +1,6 @@
 /*
  * Smart pointer for single-thread simple use cases.
+ * Aux allocator interface.
  * License: MIT (see also: LICENSE).
  * © 2025 Nekotekina.
  */
@@ -269,7 +270,49 @@ inline const_string make_string(std::string_view str)
 	return {make_smart_array(str, +1)};
 }
 
+class aux_alloc {
+	// Global variable
+	inline static bool use_aux_allocator = false;
+
+	// Get old value
+	bool old = use_aux_allocator;
+
+	friend void* operator new(size_t, std::align_val_t);
+
+public:
+	// Try to shrink latest allocation to new_size.
+	// If shrinking is not possible, does nothing.
+	static void shrink(void* ptr, size_t old_size, size_t new_size) noexcept;
+
+	void* get_head() const noexcept;
+	size_t get_size() const noexcept;
+	size_t get_count() const noexcept;
+
+	aux_alloc() noexcept
+	{
+		use_aux_allocator = true;
+	}
+	aux_alloc(const aux_alloc&) = delete;
+	aux_alloc& operator=(const aux_alloc&) = delete;
+	~aux_alloc()
+	{
+		use_aux_allocator = old;
+	}
+};
+
 template <typename PT>
 inline void smart_ptr<PT>::shrink(size_t size) noexcept requires(is_sized && std::is_trivially_destructible_v<smart_ptr<PT>::T>)
 {
+	if (!this->ptr)
+		return;
+	if (!size) {
+		*this = smart_ptr();
+		return;
+	}
+	unsigned& sz = this->_size();
+	if (size < sz) {
+		// Reduce aux memory usage if possible (does nothing otherwise)
+		aux_alloc::shrink(reinterpret_cast<std::byte*>(this->ptr) - cb_size, sz * sizeof(T) + cb_size, size * sizeof(T) + cb_size);
+		sz = size;
+	}
 }

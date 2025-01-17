@@ -351,6 +351,12 @@ int device_ungrab(struct device *dev)
 		return 0;
 
 	if (!ioctl(dev->fd, EVIOCGRAB, (void *) 0)) {
+		if (dev->capabilities & CAP_LEDS) {
+			for (int i = 0; i < LED_CNT; i++) {
+				device_set_led(dev, dev->led_state[i], i);
+			}
+		}
+
 		dev->grabbed = 0;
 		return 0;
 	} else {
