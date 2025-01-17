@@ -6,7 +6,7 @@ result often being tethered to a specified environment (X11). keyd attempts to
 solve this problem by providing a flexible system wide daemon which remaps keys
 using kernel level input primitives (evdev, uinput).
 
-keyd++ is a C++ fork of keyd and has specific features at the moment:
+keyd++ is a fork of keyd and has some additional features at the moment:
 
 - **Wildcard bindings**: `**numlock = **pause` replaces keyd's `numlock = pause`.
 - **Precise bindings**: explicit left-hand modifiers `M-f = x` or absence thereof.

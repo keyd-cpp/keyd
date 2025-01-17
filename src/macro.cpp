@@ -1,6 +1,7 @@
 #include "keyd.h"
 #include "macro.h"
 #include "config.h"
+#include "utils.hpp"
 
 bool macro::equals(const struct config* cfg, const macro& b) const
 {
@@ -39,11 +40,23 @@ bool macro::equals(const struct config* cfg, const macro& b) const
  * Returns 0 on success.
  */
 
-int macro_parse(std::string_view s, macro& macro, struct config* config)
+static std::vector<::ucmd> cmd_buf;
+
+int macro_parse(std::string_view s, macro& macro, struct config* config, const smart_ptr<env_pack>& cmd_env)
 {
+	cmd_buf.clear();
+
+	auto& commands = config ? config->commands : cmd_buf;
+
 	std::vector<macro_entry> entries;
 
-	#define ADD_ENTRY(t, d) entries.emplace_back(macro_entry{.type = t, .id = static_cast<uint16_t>(d), .code = static_cast<uint16_t>(d)})
+	auto ADD_ENTRY = [&] (macro_e t, uint16_t d) -> macro_entry& {
+		auto& entry = entries.emplace_back();
+		entry.type = t;
+		entry.id = d;
+		entry.code = d;
+		return entry;
+	};
 
 	std::string buf;
 	while (!(s = s.substr(std::min(s.size(), s.find_first_not_of(C_SPACES)))).empty()) {
@@ -64,18 +77,18 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 				err("incomplete macro command found");
 				return -1;
 			}
-			if (is_cmd && config->commands.size() > INT16_MAX) {
+			if (is_cmd && commands.size() > INT16_MAX) {
 				err("max commands exceeded");
 				return -1;
 			}
-			buf.assign(tok);
-			buf.resize(str_escape(buf.data()));
 			s.remove_prefix(tok.size() + 1);
 			if (is_cmd) {
-				ADD_ENTRY(MACRO_COMMAND, config->commands.size());
-				config->commands.emplace_back(::ucmd{
-					.cmd = std::move(buf),
-					.env = config->cmd_env,
+				ADD_ENTRY(MACRO_COMMAND, commands.size());
+				auto cmd = config ? (aux_alloc(), make_smart_buf(tok)) : make_smart_buf(tok);
+				str_escape(cmd.get());
+				commands.emplace_back(::ucmd{
+					.cmd = std::move(cmd),
+					.env = cmd_env,
 				});
 			} else {
 				uint32_t codepoint;
@@ -202,13 +215,10 @@ int macro_parse(std::string_view s, macro& macro, struct config* config)
 		macro.size = 1;
 	} else {
 		macro.size = entries.size();
-		macro.entries = make_smart_ptr<macro_entry>(entries.size());
-		memcpy(macro.entries.get(), entries.data(), sizeof(macro_entry) * entries.size());
+		macro.entries = config ? (aux_alloc(), make_buf(entries, +0)) : make_buf(entries, +0);
 	}
 
 	return 0;
-
-	#undef ADD_ENTRY
 }
 
 void macro_execute(void (*output)(uint16_t, uint8_t),
@@ -261,11 +271,19 @@ void macro_execute(void (*output)(uint16_t, uint8_t),
 			code = ent->id;
 			mods = ent->mods.mods;
 
-			for (j = 0; j < config->modifiers.size(); j++) {
-				uint16_t code = config->modifiers[j][0];
+			static constexpr std::array<uint16_t, 5> def_mods{
+				KEY_LEFTALT,
+				KEY_LEFTMETA,
+				KEY_LEFTSHIFT,
+				KEY_LEFTCTRL,
+				KEY_RIGHTALT,
+			};
+
+			for (j = 0; j < (config ? config->modifiers.size() : 5); j++) {
+				uint16_t code = (config ? config->modifiers[j][0] : def_mods[j]);
 				uint8_t mask = 1 << j;
 
-				if (mods & mask)
+				if (mods & mask && code)
 					output(code, 1);
 			}
 
@@ -275,11 +293,11 @@ void macro_execute(void (*output)(uint16_t, uint8_t),
 			output(code, 1);
 			output(code, 0);
 
-			for (j = 0; j < config->modifiers.size(); j++) {
-				uint16_t code = config->modifiers[j][0];
+			for (j = 0; j < (config ? config->modifiers.size() : 5); j++) {
+				uint16_t code = (config ? config->modifiers[j][0] : def_mods[j]);
 				uint8_t mask = 1 << j;
 
-				if (mods & mask)
+				if (mods & mask && code)
 					output(code, 0);
 			}
 
@@ -290,8 +308,7 @@ void macro_execute(void (*output)(uint16_t, uint8_t),
 			break;
 		case MACRO_COMMAND:
 			extern void execute_command(ucmd& cmd);
-			if (config)
-				execute_command(config->commands.at(ent->code));
+			execute_command(config ? config->commands.at(ent->code) : cmd_buf.at(ent->code));
 			break;
 		default:
 			continue;
@@ -300,4 +317,6 @@ void macro_execute(void (*output)(uint16_t, uint8_t),
 		if (timeout)
 			usleep(timeout);
 	}
+
+	cmd_buf.clear();
 }

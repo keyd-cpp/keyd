@@ -280,6 +280,7 @@ int main(int argc, char *argv[])
 	}
 
 	kbd = new_keyboard(std::move(kbd));
+	kbd->config.finalize();
 
 	for (i = 2; i < argc; i++)
 		total_time += run_test(kbd.get(), argv[i]);

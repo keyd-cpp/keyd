@@ -44,7 +44,7 @@ static_assert(sizeof(macro_entry) == 4);
 struct macro {
 	uint32_t size;
 	macro_entry entry;
-	smart_ptr<macro_entry> entries;
+	std::unique_ptr<macro_entry[]> entries;
 
 	const macro_entry& operator[](size_t idx) const
 	{
@@ -59,5 +59,5 @@ void macro_execute(void (*output)(uint16_t, uint8_t),
 		   const macro& macro,
 		   size_t timeout, struct config* config);
 
-int macro_parse(std::string_view, macro& macro, struct config* config);
+int macro_parse(std::string_view, macro& macro, struct config* config, const smart_ptr<struct env_pack>&);
 #endif

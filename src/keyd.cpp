@@ -8,8 +8,11 @@
 #include <link.h>
 #include <dlfcn.h>
 #include <elf.h>
+#include <sys/mman.h>
 #include <charconv>
 #include <numeric>
+#include <exception>
+#include <bit>
 
 #if (defined(__GLIBCXX__) || defined(__GLIBCPP__)) && !defined(DISABLE_HACKS)
 
@@ -264,6 +267,126 @@ extern "C" char* __cxa_demangle(const char* mangled_name, char* output_buffer, s
 	return static_cast<char*>(buf);
 }
 
+static char* aux_pool_start;
+static char* aux_pool_head;
+static size_t aux_pool_size;
+static size_t aux_alloc_count;
+static size_t aux_pool_max;
+
+void aux_alloc::shrink(void* ptr, size_t old_size, size_t new_size) noexcept
+{
+	// Some sanity checks
+	if (!ptr || old_size > aux_pool_size || new_size >= old_size)
+		return;
+	auto head = __atomic_load_n(&aux_pool_head, __ATOMIC_RELAXED);
+	if (!aux_pool_start || ptr < aux_pool_start || ptr > head)
+		return;
+	if (head - old_size == ptr) {
+		__atomic_store_n(&aux_pool_head, head - (old_size - new_size), __ATOMIC_RELAXED);
+		return;
+	}
+}
+
+void* aux_alloc::get_head() const noexcept
+{
+	return aux_pool_head;
+}
+
+size_t aux_alloc::get_size() const noexcept
+{
+	return aux_pool_head - aux_pool_start;
+}
+
+size_t aux_alloc::get_count() const noexcept
+{
+	return aux_alloc_count;
+}
+
+void* operator new(size_t size, std::align_val_t _align)
+{
+	const size_t align = size_t(_align);
+	// The purpose of aux allocator is to provide memory chunks which are unlikely to be deallocated
+	// There's only tiny overhead coming from alignment, it can also serve as a recovery tool
+	// I believe it's standard-conforming if used only explicitly by main thread
+	// It can be made fully thread-safe with some tweaking
+	if (aux_alloc::use_aux_allocator && aux_pool_size) {
+		auto start = aux_pool_start;
+		if (!start) {
+			start = static_cast<char*>(mmap(nullptr, aux_pool_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, 0, 0));
+			if (!start || intptr_t(start) == -1) {
+				perror("mmap aux heap");
+				exit(-1);
+			}
+			madvise(start, aux_pool_size, MADV_SEQUENTIAL);
+			__atomic_store_n(&aux_pool_start, start, __ATOMIC_RELAXED);
+			__atomic_store_n(&aux_pool_head, start, __ATOMIC_RELAXED);
+		}
+
+		if (!size)
+			size = 1;
+		auto head = aux_pool_head;
+		size_t rem = start + aux_pool_size - head;
+		// Align head pointer
+		size_t extra = align - (head - start) % align;
+		if (extra == align)
+			extra = 0;
+		if (size > rem || size > rem + extra)
+			throw std::bad_alloc();
+		head += extra;
+		__atomic_store_n(&aux_pool_head, head + size, __ATOMIC_RELAXED);
+		aux_pool_max = (head + size) - start;
+		aux_alloc_count++;
+		return head;
+	} else {
+		void* v = align > __STDCPP_DEFAULT_NEW_ALIGNMENT__ ? aligned_alloc(align, size) : malloc(size);
+		if (!v)
+			throw std::bad_alloc();
+		return v;
+	}
+}
+
+void* operator new(size_t size)
+{
+	return ::operator new(size, std::align_val_t{__STDCPP_DEFAULT_NEW_ALIGNMENT__});
+}
+
+void operator delete(void* ptr, std::align_val_t) noexcept
+{
+	if (!ptr)
+		return;
+	// Atomics are used to prevent other thread accidentally reading "teared" value
+	const auto start = __atomic_load_n(&aux_pool_start, __ATOMIC_RELAXED);
+	const auto head = __atomic_load_n(&aux_pool_head, __ATOMIC_RELAXED);
+	if (start && ptr >= start && ptr < start + aux_pool_size && head >= start && head < start + aux_pool_size) {
+		if (!aux_alloc_count || ptr >= head) {
+			fprintf(stderr, "Invalid deallocation at %p\n", ptr);
+			return;
+		}
+		if (!--aux_alloc_count) {
+			if (munmap(start, aux_pool_size) < 0) {
+				perror("munmap aux");
+				exit(-1);
+			}
+			fprintf(stderr, "Aux heap freed: %zu bytes used\n", aux_pool_max);
+			aux_pool_max = 0;
+			__atomic_store_n(&aux_pool_start, nullptr, __ATOMIC_RELAXED);
+			__atomic_store_n(&aux_pool_head, nullptr, __ATOMIC_RELAXED);
+		}
+	} else {
+		free(ptr);
+	}
+}
+
+void operator delete(void* ptr, size_t) noexcept
+{
+	return ::operator delete(ptr, std::align_val_t{__STDCPP_DEFAULT_NEW_ALIGNMENT__});
+}
+
+void operator delete(void* ptr) noexcept
+{
+	return ::operator delete(ptr, std::align_val_t{__STDCPP_DEFAULT_NEW_ALIGNMENT__});
+}
+
 static int ipc_exec(enum ipc_msg_type_e type, const char *data, size_t sz, uint32_t timeout)
 {
 	struct ipc_message msg;
@@ -273,6 +396,10 @@ static int ipc_exec(enum ipc_msg_type_e type, const char *data, size_t sz, uint3
 	msg.type = type;
 	msg.sz = sz;
 	msg.timeout = timeout;
+	if constexpr (std::endian::native == std::endian::big) {
+		msg.sz = __builtin_bswap64(msg.sz);
+		msg.timeout = __builtin_bswap64(msg.timeout);
+	}
 	memcpy(msg.data, data, sz);
 
 	static int con = -1;
@@ -288,6 +415,10 @@ static int ipc_exec(enum ipc_msg_type_e type, const char *data, size_t sz, uint3
 	if (!xread(con, &msg, sizeof msg))
 		exit(-1);
 
+	if constexpr (std::endian::native == std::endian::big) {
+		msg.sz = __builtin_bswap64(msg.sz);
+		msg.timeout = __builtin_bswap64(msg.timeout);
+	}
 	if (msg.sz) {
 		xwrite(1, msg.data, msg.sz);
 		xwrite(1, "\n", 1);
@@ -506,12 +637,14 @@ struct {
 	{"list-keys", "", "", list_keys},
 };
 
-int main(int argc, char *argv[])
+int main(int argc, char *argv[], char*[])
 {
-	size_t i;
+	aux_pool_size = 0x200'000;
 
-	log_level =
-	    atoi(getenv("KEYD_DEBUG") ? getenv("KEYD_DEBUG") : "");
+	if (auto dbg = getenv("KEYD_DEBUG"))
+		log_level = atoi(dbg);
+	if (auto aux = getenv("KEYD_AUX_POOL"))
+		aux_pool_size = atoi(aux);
 
 	if (isatty(1))
 		suppress_colours = getenv("NO_COLOR") ? 1 : 0;
@@ -525,7 +658,7 @@ int main(int argc, char *argv[])
 	signal(SIGPIPE, SIG_IGN);
 
 	if (argc > 1) {
-		for (i = 0; i < ARRAY_SIZE(commands); i++)
+		for (size_t i = 0; i < ARRAY_SIZE(commands); i++)
 			if (!strcmp(commands[i].name, argv[1]) ||
 				!strcmp(commands[i].flag, argv[1]) ||
 				!strcmp(commands[i].long_flag, argv[1])) {

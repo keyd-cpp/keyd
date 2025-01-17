@@ -1,5 +1,6 @@
 /*
  * Smart pointer for single-thread simple use cases.
+ * Aux allocator interface.
  * License: MIT (see also: LICENSE).
  * © 2025 Nekotekina.
  */
@@ -32,7 +33,7 @@ public:
 	static constexpr bool is_sized = std::is_unbounded_array_v<PT>;
 	using T = std::conditional_t<is_sized, std::remove_extent_t<PT>, PT>;
 	static constexpr size_t cb_size = is_sized ? sizeof(int[2]) : sizeof(int);
-	static constexpr size_t cb_align = alignof(T) > cb_size ? alignof(T) : cb_size;
+	static constexpr size_t cb_align = alignof(T) > alignof(int) ? alignof(T) : alignof(int);
 
 	smart_ptr() noexcept = default;
 
@@ -70,7 +71,7 @@ public:
 			} else {
 				this->ptr->~T();
 			}
-			::operator delete[](reinterpret_cast<std::byte*>(this->ptr) - cb_align, std::align_val_t{cb_align});
+			::operator delete[](reinterpret_cast<std::byte*>(this->ptr) - cb_size, std::align_val_t{cb_align});
 		}
 	}
 
@@ -126,14 +127,12 @@ template <typename TT, bool Init = true, typename... Args>
 smart_ptr<TT> make_smart_ptr(size_t count = 1, const Args&... args)
 {
 	using T = smart_ptr<TT>::T;
+	static_assert(std::is_nothrow_default_constructible_v<T>);
 	if constexpr (!std::is_trivially_destructible_v<T> && !smart_ptr<TT>::is_sized)
 		assert(count == 1);
 
-	constexpr size_t cb_size = smart_ptr<TT>::cb_align;
-	constexpr size_t absurd = (size_t(0) - cb_size) / sizeof(T) - 1;
-	if (count > absurd)
-		count = absurd; // Make sure it fails without overflow
-	std::byte* bytes = static_cast<std::byte*>(::operator new[](cb_size + count * sizeof(T), std::align_val_t{cb_size}));
+	constexpr size_t cb_size = smart_ptr<TT>::cb_size;
+	std::byte* bytes = static_cast<std::byte*>(::operator new[](cb_size + count * sizeof(T), std::align_val_t{smart_ptr<TT>::cb_align}));
 	memset(bytes, 0, cb_size); // Clear control block
 	T* arr = reinterpret_cast<T*>(bytes + cb_size);
 
@@ -168,8 +167,7 @@ auto make_smart_buf(const S& src, size_t add = 1)
 	size_t i = 0;
 	for (auto it = std::begin(src), end = std::end(src); it != end; it++)
 		r[i++] = *it;
-	for (; i < sz; i++)
-		r[i] = T();
+	std::uninitialized_value_construct_n(r.get() + (sz - add), add);
 	return r;
 }
 
@@ -186,8 +184,7 @@ auto make_smart_array(const S& src, size_t add = 0)
 	size_t i = 0;
 	for (auto it = std::begin(src), end = std::end(src); it != end; it++)
 		r[i++] = *it;
-	for (; i < sz; i++)
-		r[i] = T();
+	std::uninitialized_value_construct_n(r.get() + (sz - add), add);
 	return r;
 }
 
@@ -195,15 +192,46 @@ template <typename S>
 auto make_buf(const S& src, size_t add = 1)
 {
 	using T = std::decay_t<decltype(*std::begin(src))>;
+	static_assert(std::is_nothrow_default_constructible_v<T>);
 	std::unique_ptr<T[]> r;
 	size_t sz = std::size(src) + add;
 	if (!sz)
 		return r;
-	r = std::make_unique_for_overwrite<T[]>(sz);
+	r.reset(static_cast<T*>(operator new[](sz * sizeof(T), std::align_val_t{alignof(T)})));
+	auto next = std::uninitialized_default_construct_n(r.get(), (sz - add));
 	size_t i = 0;
 	for (auto it = std::begin(src), end = std::end(src); it != end; it++)
 		r[i++] = *it;
-	for (; i < sz; i++)
-		r[i] = T();
+	std::uninitialized_value_construct_n(next, add);
 	return r;
 }
+
+class aux_alloc {
+	// Global variable
+	inline static bool use_aux_allocator = false;
+
+	// Get old value
+	bool old = use_aux_allocator;
+
+	friend void* operator new(size_t, std::align_val_t);
+
+public:
+	// Try to shrink latest allocation to new_size.
+	// If shrinking is not possible, does nothing.
+	void shrink(void* ptr, size_t old_size, size_t new_size) noexcept;
+
+	void* get_head() const noexcept;
+	size_t get_size() const noexcept;
+	size_t get_count() const noexcept;
+
+	aux_alloc()
+	{
+		use_aux_allocator = true;
+	}
+	aux_alloc(const aux_alloc&) = delete;
+	aux_alloc& operator=(const aux_alloc&) = delete;
+	~aux_alloc()
+	{
+		use_aux_allocator = old;
+	}
+};

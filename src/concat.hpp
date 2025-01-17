@@ -29,17 +29,21 @@ struct concat_res {
 
 template <>
 struct concat_res<size_t(-1)> {
+	concat_res() noexcept = default;
+
 	// Should be copyable so it's not a unique_ptr
 	explicit concat_res(size_t size)
-		: data(make_smart_ptr<char>(size + 1))
+		: data(make_smart_ptr<char, false>(size + 1))
 	{
 	}
 
 	smart_ptr<char> data;
-	size_t size;
+	size_t size = 0;
 	const char* c_str() const { return data.get(); }
 	std::string_view get() const { return {data.get(), size}; }
 };
+
+concat_res() -> concat_res<>;
 
 template <typename T>
 constexpr bool concat_fixed()
@@ -47,8 +51,10 @@ constexpr bool concat_fixed()
 	if constexpr (std::is_trivially_copyable_v<T>)
 		if constexpr (std::is_integral_v<T> || std::is_array_v<T>)
 			return true;
+		else if constexpr (std::is_pointer_v<T>)
+			return false;
 		else
-			return std::size(std::declval<T>());
+			return T().size();
 	else
 		return false;
 }
@@ -60,8 +66,10 @@ constexpr size_t concat_sz()
 		return sizeof(T) == 1 ? 4 : sizeof(T) * 3;
 	else if constexpr (std::is_array_v<T>)
 		return sizeof(T);
+	else if constexpr (std::is_pointer_v<T>)
+		return 0;
 	else if constexpr (std::is_trivially_copyable_v<T>)
-		return std::size(std::declval<T>());
+		return T().size();
 	else
 		return 0;
 }
@@ -72,19 +80,29 @@ constexpr size_t concat_sz(const T& arg)
 	if constexpr (std::is_integral_v<T>)
 		return concat_sz<T>();
 	else
-		return std::size(arg);
+		return strnlen(std::data(arg), std::size(arg));
+}
+
+inline size_t concat_sz(const char* arg)
+{
+	return strlen(arg);
 }
 
 template <typename T>
-constexpr void concat_append(char*& ptr, const T& arg)
+constexpr void concat_append(char*& ptr, const T& arg, [[maybe_unused]] size_t len)
 {
 	if constexpr (std::is_integral_v<T>) {
 		ptr = std::to_chars(ptr, ptr + concat_sz<T>(), arg).ptr;
 	} else {
-		size_t len = strnlen(std::data(arg), std::size(arg));
 		memcpy(ptr, std::data(arg), len);
 		ptr += len;
 	}
+}
+
+inline void concat_append(char*& ptr, const char* arg, size_t len)
+{
+	memcpy(ptr, arg, len);
+	ptr += len;
 }
 
 template <bool Alloc = false, typename... Args, bool Dyn = (Alloc || ... || !concat_fixed<Args>())>
@@ -92,9 +110,14 @@ static constexpr auto concat(const Args&... args) {
 	// Compute static size
 	constexpr size_t Size = Dyn ? size_t(-1) : (concat_sz<Args>() + ... + size_t(1));
 	// Compute dynamic size
-	concat_res<Size> result((concat_sz(args) + ... + size_t(0)));
+	const size_t sizes[]{concat_sz(args)...};
+	size_t size = 0;
+	for (size_t i = 0; i < sizeof...(Args); i++)
+		size += sizes[i];
+	concat_res<Size> result(size);
 	char* ptr = &*result.data;
-	(concat_append(ptr, args), ...);
+	size = 0;
+	(concat_append(ptr, args, sizes[size++]), ...);
 	result.size = ptr - &*result.data;
 	*ptr = 0;
 	return result;

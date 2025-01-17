@@ -491,7 +491,7 @@ static int check_chord_match(struct keyboard *kbd, const struct chord **chord, i
 
 void execute_command(ucmd& cmd)
 {
-	dbg("executing command: %s", cmd.cmd.c_str());
+	dbg("executing command: %s", cmd.cmd.get());
 
 	if (fork()) {
 		return;
@@ -521,9 +521,9 @@ void execute_command(ucmd& cmd)
 	dup2(fd, 2);
 
 	if (auto env = cmd.env.get(); env && env->env)
-		execle("/bin/sh", "/bin/sh", "-c", cmd.cmd.c_str(), nullptr, env->env.get());
+		execle("/bin/sh", "/bin/sh", "-c", cmd.cmd.get(), nullptr, env->env.get());
 	else
-		execl("/bin/sh", "/bin/sh", "-c", cmd.cmd.c_str(), nullptr);
+		execl("/bin/sh", "/bin/sh", "-c", cmd.cmd.get(), nullptr);
 }
 
 static void clear_oneshot(struct keyboard *kbd, [[maybe_unused]] const char* reason)
@@ -1342,6 +1342,8 @@ exit:
 
 int64_t kbd_process_events(struct keyboard *kbd, const struct key_event *events, size_t n, bool real)
 {
+	assert(kbd->config.finalized);
+
 	size_t i = 0;
 	int64_t timeout = 0;
 	int64_t timeout_ts = 0;
@@ -1370,27 +1372,17 @@ bool kbd_eval(struct keyboard* kbd, std::string_view exp)
 	if (exp.empty())
 		return true;
 	if (exp == "reset") {
-		kbd->original_config.back().restore(kbd);
-		kbd->update_layer_state();
+		kbd->backup->restore(kbd);
 		return true;
-	} else if (exp == "push") {
-		kbd->original_config.emplace_back(kbd->config);
-		return true;
-	} else if (exp == "pop") {
-		// Don't allow removing first "backup"
-		if (kbd->original_config.size() <= 1)
-			return false;
-		kbd->original_config.pop_back();
-		return true;
-	} else if (exp == "pop_all") {
-		while (kbd->original_config.size() > 1)
-			kbd->original_config.pop_back();
-		return true;
-	} else if (exp == "unbind_all") {
+	}
+
+	if (exp == "unbind_all") {
+		// TODO: execute clear? Or it's OK?
 		for (auto& layer : kbd->config.layers) {
 			layer.chords.clear();
-			layer.keymap = {};
+			layer.keymap.mapv.clear();
 		}
+		return true;
 	} else {
 		auto section = exp.substr(0, exp.find_first_of('.'));
 		if (section.size() == exp.size())
@@ -1398,8 +1390,6 @@ bool kbd_eval(struct keyboard* kbd, std::string_view exp)
 		else
 			exp.remove_prefix(section.size() + 1);
 		if (int idx = config_add_entry(&kbd->config, section, exp); idx >= 0) {
-			kbd->config.layers[idx].keymap.sort();
-			kbd->update_layer_state();
 			return true;
 		}
 	}
