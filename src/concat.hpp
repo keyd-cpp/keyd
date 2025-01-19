@@ -10,11 +10,12 @@
 #include <memory>
 #include <charconv>
 #include <array>
+#include <string_view>
 #include "utils.hpp"
 
 using size_t = decltype(sizeof(char));
 
-// Return owning string_view-alike thing
+// String-like thing with fixed or dynamic size
 template <size_t Size = size_t(-1)>
 struct concat_res {
 	explicit concat_res(size_t) noexcept
@@ -23,8 +24,9 @@ struct concat_res {
 
 	char data[Size];
 	size_t size;
-	const char* c_str() const { return data; }
-	std::string_view get() const { return {data, size}; }
+	char* ptr() noexcept { return data; }
+	const char* c_str() const noexcept { return data; }
+	std::string_view get() const noexcept { return {data, size}; }
 };
 
 template <>
@@ -33,17 +35,16 @@ struct concat_res<size_t(-1)> {
 
 	// Should be copyable so it's not a unique_ptr
 	explicit concat_res(size_t size)
-		: data(make_smart_ptr<char, false>(size + 1))
+		: data({make_smart_ptr<char[], false>(size + 1)})
 	{
 	}
 
-	smart_ptr<char> data;
+	const_string data;
 	size_t size = 0;
-	const char* c_str() const { return data.get(); }
-	std::string_view get() const { return {data.get(), size}; }
+	char* ptr() noexcept { return data.data(); }
+	const char* c_str() const noexcept { return data.c_str(); }
+	std::string_view get() const noexcept { return {data.c_str(), size}; }
 };
-
-concat_res() -> concat_res<>;
 
 template <typename T>
 constexpr bool concat_fixed()
@@ -114,11 +115,19 @@ static constexpr auto concat(const Args&... args) {
 	size_t size = 0;
 	for (size_t i = 0; i < sizeof...(Args); i++)
 		size += sizes[i];
+	if constexpr (Dyn)
+		if (!size)
+			return const_string{};
 	concat_res<Size> result(size);
-	char* ptr = &*result.data;
+	char* ptr = result.ptr();
 	size = 0;
 	(concat_append(ptr, args, sizes[size++]), ...);
-	result.size = ptr - &*result.data;
+	result.size = ptr - result.ptr();
 	*ptr = 0;
-	return result;
+	if constexpr (Dyn && (std::is_integral_v<Args> || ...))
+		result.data.ptr.shrink(result.size + 1);
+	if constexpr (Dyn)
+		return std::move(result.data);
+	else
+		return result;
 }

@@ -22,7 +22,8 @@
 #define MOD_ALT 0
 
 // Mod codes
-constexpr std::string_view mod_ids = "AMSCGHLN";
+#define MOD_IDS "AMSCGHLN"
+constexpr std::string_view mod_ids = MOD_IDS;
 
 #define MAX_MOD		8
 

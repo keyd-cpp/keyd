@@ -180,7 +180,7 @@ static void on_layer_change(const struct keyboard *kbd, struct layer *layer, uin
 	for (auto& listener : listeners) {
 		if (listener < 0)
 			continue;
-		if (layer->name[0]) {
+		if (layer->name) {
 			if (dprintf(listener, "%c%s\n", c, layer->name.c_str()) < 0) {
 				listener = {};
 				continue;
@@ -314,7 +314,7 @@ static void manage_device(struct device *dev)
 
 	if (env && env->uid >= 1000) {
 		// Load user bindings (may be not loaded when executed as root)
-		concat_res buf;
+		const_string buf;
 		const auto name = "/keyd/bindings.conf";
 		if (auto v = env->getenv("XDG_CONFIG_HOME"))
 			buf = concat(v, name);

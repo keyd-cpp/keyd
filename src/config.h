@@ -10,10 +10,8 @@
 #include "macro.h"
 #include <memory>
 #include <vector>
-#include <string>
 #include <string_view>
 #include <array>
-#include <map>
 #include "utils.hpp"
 
 #define MAX_DESCRIPTOR_ARGS	3
@@ -117,51 +115,24 @@ static_assert(sizeof(chord) == 26);
  */
 
 struct layer {
-	std::string name;
-	std::vector<chord> chords;
+	const_string name;
 	descriptor_map keymap;
-
-	// Iterator over composite layer components
-	struct iterator
-	{
-		using difference_type = ptrdiff_t;
-		using value_type = uint16_t;
-		using pointer = void;
-		using reference = uint16_t;
-		using iterator_category = std::forward_iterator_tag;
-
-		const char* raw_ptr;
-
-		uint16_t operator*() const
-		{
-			// Unaligned read from name
-			uint16_t value;
-			memcpy(&value, this->raw_ptr, sizeof(value));
-			return value;
-		}
-
-		iterator& operator++()
-		{
-			this->raw_ptr += 2;
-			return *this;
-		}
-
-		auto operator<=>(const iterator&) const = default;
-	};
+	std::vector<chord> chords;
+	smart_ptr<uint16_t[]> composition;
 
 	size_t size() const
 	{
-		return name[0] ? 1 : name.size() / 2;
+		return composition.size();
 	}
 
-	iterator begin() const
+	uint16_t* begin() const
 	{
-		return {name.c_str() + (name[0] ? name.size() : 1)};
+		return composition.begin();
 	}
 
-	iterator end() const
+	uint16_t* end() const
 	{
-		return {name.c_str() + name.size()};
+		return composition.end();
 	}
 };
 
@@ -174,17 +145,17 @@ struct env_pack {
 
 	const char* getenv(std::string_view);
 
-	bool operator==(const env_pack& rhs) const
+	bool operator==(const env_pack& rhs) const noexcept
 	{
 		return uid == rhs.uid && gid == rhs.gid && memcmp(buf.get(), rhs.buf.get(), buf_size) == 0;
 	}
 };
 
 struct ucmd {
-	smart_ptr<char> cmd;
+	const_string cmd;
 	smart_ptr<env_pack> env;
 
-	bool operator==(const ucmd&) const = default;
+	bool operator==(const ucmd& rhs) const noexcept = default;
 };
 
 struct dev_id {
@@ -192,30 +163,49 @@ struct dev_id {
 	std::array<char, 23> id;
 };
 
+struct alias {
+	uint16_t id;
+	uint8_t mods;
+	uint8_t wildcard;
+};
+
+struct alias_list {
+	const_string name;
+	smart_ptr<alias[]> list;
+};
+
 struct config {
 	std::vector<layer> layers;
 	std::vector<uint16_t> layer_index;
-	std::array<std::u16string, 8> modifiers;
+	std::array<smart_ptr<uint16_t[]>, 8> modifiers;
+
+	bool is_mod(size_t i, uint16_t id) {
+		for (auto& mod : modifiers[i]) {
+			if (mod == id)
+				return true;
+		}
+		return false;
+	}
 
 	/* Auxiliary descriptors used by layer bindings. */
 	std::vector<descriptor> descriptors;
 	std::vector<macro> macros;
 	std::vector<ucmd> commands;
-	std::map<std::string, std::vector<descriptor>, std::less<>> aliases;
 
+	smart_ptr<alias_list[]> aliases;
 	smart_ptr<env_pack> cmd_env;
 
 	std::vector<dev_id> ids;
 
-	int64_t macro_timeout;
-	int64_t macro_sequence_timeout;
-	int64_t macro_repeat_timeout;
-	int64_t oneshot_timeout;
+	int64_t macro_timeout = 600;
+	int64_t macro_sequence_timeout = 0;
+	int64_t macro_repeat_timeout = 50;
+	int64_t oneshot_timeout = 0;
 
-	int64_t overload_tap_timeout;
+	int64_t overload_tap_timeout = 0;
 
-	int64_t chord_interkey_timeout;
-	int64_t chord_hold_timeout;
+	int64_t chord_interkey_timeout = 50;
+	int64_t chord_hold_timeout = 0;
 
 	bool compat : 1 = false;
 	bool finalized : 1 = false;
@@ -228,8 +218,8 @@ struct config {
 	uint8_t add_left_wildc = 0;
 	uint8_t add_right_mods = 0;
 	uint8_t add_right_wildc = 0;
-	std::string default_layout;
-	std::string pathstr;
+	const_string default_layout;
+	const_string pathstr;
 
 	void finalize() noexcept;
 
@@ -251,7 +241,6 @@ struct config_backup {
 	size_t cmd_count;
 	// These ones are nasty
 	smart_ptr<layer_backup[]> layers;
-	decltype(config::modifiers) mods;
 	smart_ptr<env_pack> _env;
 
 	explicit config_backup(const struct config& cfg);

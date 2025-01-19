@@ -9,6 +9,7 @@
 #include <type_traits>
 #include <cassert>
 #include <memory>
+#include <string_view>
 
 using size_t = decltype(sizeof(char));
 
@@ -32,8 +33,9 @@ class smart_ptr final {
 public:
 	static constexpr bool is_sized = std::is_unbounded_array_v<PT>;
 	using T = std::conditional_t<is_sized, std::remove_extent_t<PT>, PT>;
-	static constexpr size_t cb_size = is_sized ? sizeof(int[2]) : sizeof(int);
+	static constexpr size_t cb_block = is_sized ? sizeof(int[2]) : sizeof(int);
 	static constexpr size_t cb_align = alignof(T) > alignof(int) ? alignof(T) : alignof(int);
+	static constexpr size_t cb_size = cb_align > cb_block ? cb_align : cb_block;
 
 	smart_ptr() noexcept = default;
 
@@ -116,6 +118,8 @@ public:
 	{
 		return this->ptr ? this->ptr + this->size() : nullptr;
 	}
+
+	void shrink(size_t size) noexcept requires(is_sized && std::is_trivially_destructible_v<T>);
 
 	bool operator==(const smart_ptr&) const noexcept = default;
 
@@ -206,6 +210,66 @@ auto make_buf(const S& src, size_t add = 1)
 	return r;
 }
 
+struct const_string {
+	smart_ptr<char[]> ptr;
+
+	operator std::string_view() const noexcept
+	{
+		if (!ptr)
+			return {};
+		return {ptr.get(), ptr.size() - 1};
+	}
+
+	const char* c_str() const noexcept
+	{
+		if (!ptr)
+			return "";
+		return ptr.get();
+	}
+
+	char* data() const noexcept
+	{
+		return ptr.get();
+	}
+
+	size_t size() const noexcept
+	{
+		if (!ptr)
+			return 0;
+		return ptr.size() - 1;
+	}
+
+	bool empty() const noexcept
+	{
+		return !this->size();
+	}
+
+	// Checks allocation, not size (allocation may be of empty NTS)
+	explicit operator bool() const noexcept
+	{
+		return !!ptr;
+	}
+
+	template <typename T>
+	bool operator ==(const T& rhs) const noexcept
+	{
+		return operator std::string_view() == std::string_view(rhs);
+	}
+
+	template <typename T>
+	bool operator <(const T& rhs) const noexcept
+	{
+		return operator std::string_view() < std::string_view(rhs);
+	}
+};
+
+inline const_string make_string(std::string_view str)
+{
+	if (str.empty())
+		return {};
+	return {make_smart_array(str, +1)};
+}
+
 class aux_alloc {
 	// Global variable
 	inline static bool use_aux_allocator = false;
@@ -218,13 +282,13 @@ class aux_alloc {
 public:
 	// Try to shrink latest allocation to new_size.
 	// If shrinking is not possible, does nothing.
-	void shrink(void* ptr, size_t old_size, size_t new_size) noexcept;
+	static void shrink(void* ptr, size_t old_size, size_t new_size) noexcept;
 
 	void* get_head() const noexcept;
 	size_t get_size() const noexcept;
 	size_t get_count() const noexcept;
 
-	aux_alloc()
+	aux_alloc() noexcept
 	{
 		use_aux_allocator = true;
 	}
@@ -235,3 +299,20 @@ public:
 		use_aux_allocator = old;
 	}
 };
+
+template <typename PT>
+inline void smart_ptr<PT>::shrink(size_t size) noexcept requires(is_sized && std::is_trivially_destructible_v<smart_ptr<PT>::T>)
+{
+	if (!this->ptr)
+		return;
+	if (!size) {
+		*this = smart_ptr();
+		return;
+	}
+	unsigned& sz = this->_size();
+	if (size < sz) {
+		// Reduce aux memory usage if possible (does nothing otherwise)
+		aux_alloc::shrink(reinterpret_cast<std::byte*>(this->ptr) - cb_size, sz * sizeof(T) + cb_size, size * sizeof(T) + cb_size);
+		sz = size;
+	}
+}

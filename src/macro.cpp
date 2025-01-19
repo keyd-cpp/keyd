@@ -2,6 +2,7 @@
 #include "macro.h"
 #include "config.h"
 #include "utils.hpp"
+#include <string>
 
 bool macro::equals(const struct config* cfg, const macro& b) const
 {
@@ -84,8 +85,8 @@ int macro_parse(std::string_view s, macro& macro, struct config* config, const s
 			s.remove_prefix(tok.size() + 1);
 			if (is_cmd) {
 				ADD_ENTRY(MACRO_COMMAND, commands.size());
-				auto cmd = config ? (aux_alloc(), make_smart_buf(tok)) : make_smart_buf(tok);
-				str_escape(cmd.get());
+				auto cmd = config ? (aux_alloc(), make_string(tok)) : make_string(tok);
+				cmd.ptr.shrink(str_escape(cmd.data()) + 1);
 				commands.emplace_back(::ucmd{
 					.cmd = std::move(cmd),
 					.env = cmd_env,
@@ -271,7 +272,7 @@ void macro_execute(void (*output)(uint16_t, uint8_t),
 			code = ent->id;
 			mods = ent->mods.mods;
 
-			static constexpr std::array<uint16_t, 5> def_mods{
+			static constexpr std::array<uint16_t, MAX_MOD> def_mods{
 				KEY_LEFTALT,
 				KEY_LEFTMETA,
 				KEY_LEFTSHIFT,
@@ -279,8 +280,8 @@ void macro_execute(void (*output)(uint16_t, uint8_t),
 				KEY_RIGHTALT,
 			};
 
-			for (j = 0; j < (config ? config->modifiers.size() : 5); j++) {
-				uint16_t code = (config ? config->modifiers[j][0] : def_mods[j]);
+			for (j = 0; j < MAX_MOD; j++) {
+				uint16_t code = (config ? (config->modifiers[j] ? config->modifiers[j][0] : 0) : def_mods[j]);
 				uint8_t mask = 1 << j;
 
 				if (mods & mask && code)
@@ -293,8 +294,8 @@ void macro_execute(void (*output)(uint16_t, uint8_t),
 			output(code, 1);
 			output(code, 0);
 
-			for (j = 0; j < (config ? config->modifiers.size() : 5); j++) {
-				uint16_t code = (config ? config->modifiers[j][0] : def_mods[j]);
+			for (j = 0; j < MAX_MOD; j++) {
+				uint16_t code = (config ? (config->modifiers[j] ? config->modifiers[j][0] : 0) : def_mods[j]);
 				uint8_t mask = 1 << j;
 
 				if (mods & mask && code)

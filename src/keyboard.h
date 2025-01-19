@@ -151,7 +151,7 @@ struct keyboard {
 		for (size_t i = 0; i < layer_state.size(); i++) {
 			auto& layer = config.layers[i];
 			// Cache whether the layer is truly composite (not dummy)
-			layer_state[i].composite = !layer.name[0] && (!layer.keymap.empty() || !layer.chords.empty());
+			layer_state[i].composite = layer.composition && (!layer.keymap.empty() || !layer.chords.empty());
 		}
 	}
 
