@@ -180,7 +180,7 @@ static void on_layer_change(const struct keyboard *kbd, struct layer *layer, uin
 	for (auto& listener : listeners) {
 		if (listener < 0)
 			continue;
-		if (layer->name[0]) {
+		if (layer->name) {
 			if (dprintf(listener, "%c%s\n", c, layer->name.c_str()) < 0) {
 				listener = {};
 				continue;

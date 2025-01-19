@@ -129,7 +129,7 @@ static void set_mods(struct keyboard *kbd, uint8_t mods)
 				continue;
 			if (std::any_of(codes.begin(), codes.end(), [&](uint16_t c) { return kbd->keystate[c]; }))
 				continue;
-			if (!codes.empty())
+			if (codes)
 				send_key(kbd, codes[0], 1);
 		} else {
 			// Clear all possible keys for this mod
@@ -207,7 +207,7 @@ static uint8_t what_mods(struct keyboard* kbd, uint16_t code)
 
 	for (size_t i = 0; i < kbd->config.modifiers.size(); i++) {
 		uint8_t mask = 1 << i;
-		if (kbd->config.modifiers[i].find_first_of(code) + 1)
+		if (kbd->config.is_mod(i, code))
 			mods |= mask;
 	}
 
@@ -317,7 +317,7 @@ static void lookup_descriptor(struct keyboard *kbd, uint16_t code, struct descri
 	if (d->op == OP_NULL || conflicts > 1) {
 		// If key is a registered modifier, fallback to setting layer by default
 		for (size_t i = 0; i < MAX_MOD; i++) {
-			if (kbd->config.modifiers[i].find_first_of(code) + 1) {
+			if (kbd->config.is_mod(i, code)) {
 				desc.op = OP_LAYER;
 				desc.args[0].idx = i + 1;
 				break;
@@ -340,7 +340,7 @@ static void deactivate_layer(struct keyboard *kbd, int idx)
 		return activate_layer(kbd, 0, -idx);
 
 	::layer& layer = kbd->config.layers.at(idx);
-	if (layer.name[0]) {
+	if (layer.name) {
 		dbg("Deactivating layer %s", layer.name.c_str());
 		kbd->layer_state[idx].active_s--;
 	} else {
@@ -370,7 +370,7 @@ static void activate_layer(struct keyboard *kbd, uint16_t code, int idx)
 	struct cache_entry *ce;
 
 	const auto ts = get_time();
-	if (layer.name[0]) {
+	if (layer.name) {
 		dbg("Activating layer %s", layer.name.c_str());
 		kbd->layer_state[idx].active_s++;
 		if (kbd->layer_state[idx].active())
@@ -491,7 +491,7 @@ static int check_chord_match(struct keyboard *kbd, const struct chord **chord, i
 
 void execute_command(ucmd& cmd)
 {
-	dbg("executing command: %s", cmd.cmd.get());
+	dbg("executing command: %s", cmd.cmd.c_str());
 
 	if (fork()) {
 		return;
@@ -521,9 +521,9 @@ void execute_command(ucmd& cmd)
 	dup2(fd, 2);
 
 	if (auto env = cmd.env.get(); env && env->env)
-		execle("/bin/sh", "/bin/sh", "-c", cmd.cmd.get(), nullptr, env->env.get());
+		execle("/bin/sh", "/bin/sh", "-c", cmd.cmd.c_str(), nullptr, env->env.get());
 	else
-		execl("/bin/sh", "/bin/sh", "-c", cmd.cmd.get(), nullptr);
+		execl("/bin/sh", "/bin/sh", "-c", cmd.cmd.c_str(), nullptr);
 }
 
 static void clear_oneshot(struct keyboard *kbd, [[maybe_unused]] const char* reason)
@@ -969,12 +969,12 @@ std::unique_ptr<keyboard> new_keyboard(std::unique_ptr<keyboard> kbd)
 	kbd->layer_state[0].active_s = 1;
 	kbd->layer_state[0].activation_time = 0;
 
-	if (!kbd->config.default_layout.empty() && kbd->config.default_layout != kbd->config.layers[0].name) {
+	if (kbd->config.default_layout && kbd->config.default_layout != kbd->config.layers[0].name) {
 		int found = 0;
 		for (i = 1; i < kbd->config.layers.size(); i++) {
 			struct layer *layer = &kbd->config.layers[i];
 
-			if (layer->name[0] && layer->name == kbd->config.default_layout) {
+			if (layer->name == kbd->config.default_layout) {
 				kbd->layer_state[i].active_s = 1;
 				kbd->layer_state[i].activation_time = 1;
 				kbd->layout = i;
