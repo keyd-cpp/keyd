@@ -22,13 +22,13 @@ static uint64_t get_time_ns()
 static uint16_t lookup_code(const char *name)
 {
 	if (!strcmp(name, "control") || !strcmp(name, "ctrl"))
-		return KEYD_LEFTCTRL;
+		return KEY_LEFTCTRL;
 	if (!strcmp(name, "shift"))
-		return KEYD_LEFTSHIFT;
+		return KEY_LEFTSHIFT;
 	if (!strcmp(name, "meta"))
-		return KEYD_LEFTMETA;
+		return KEY_LEFTMETA;
 	if (!strcmp(name, "alt"))
-		return KEYD_LEFTALT;
+		return KEY_LEFTALT;
 
 	for (size_t i = 0; i <= KEY_MAX; i++)
 		if (keycode_table[i].name() == name)

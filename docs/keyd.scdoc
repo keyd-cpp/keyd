@@ -31,7 +31,7 @@ keyd(1)
 	between emitted events.
 
 *do [-t <timeout>] [<exp>]*
-	Execute the supplied expression. See MACROS for the format of <exp>. If no arguments are given, the expression is read from STDIN. If supplied, <timeout> corresponds to the macro_sequence_timeout. This macro expression is _not_ allowed to execute shell commands.
+	Execute the supplied expression. See MACROS for the format of <exp>. If no arguments are given, the expression is read from STDIN. If supplied, <timeout> corresponds to the macro_sequence_timeout.
 
 # OPTIONS
 

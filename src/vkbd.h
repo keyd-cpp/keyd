@@ -11,8 +11,7 @@
 
 struct vkbd;
 
-// TODO: use virtual destructor
-std::shared_ptr<vkbd> vkbd_init(const char *name);
+struct vkbd* vkbd_init(const char *name);
 
 void vkbd_mouse_move(struct vkbd* vkbd, int x, int y);
 void vkbd_mouse_move_abs(struct vkbd* vkbd, int x, int y);

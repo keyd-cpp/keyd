@@ -95,16 +95,16 @@ static void clear_mod(struct keyboard *kbd, uint16_t code)
 	 * additional control sequences.
 	 */
 	int guard = (((kbd->last_pressed_output_code == code) &&
-			(code == KEYD_LEFTMETA ||
-			 code == KEYD_LEFTALT ||
-			 code == KEYD_RIGHTALT)) &&
+			(code == KEY_LEFTMETA ||
+			 code == KEY_LEFTALT ||
+			 code == KEY_RIGHTALT)) &&
 		       !kbd->inhibit_modifier_guard &&
 		       !kbd->config.disable_modifier_guard);
 
-	if (guard && !kbd->keystate[KEYD_LEFTCTRL]) {
-		send_key(kbd, KEYD_LEFTCTRL, 1);
+	if (guard && !kbd->keystate[KEY_LEFTCTRL]) {
+		send_key(kbd, KEY_LEFTCTRL, 1);
 		send_key(kbd, code, 0);
-		send_key(kbd, KEYD_LEFTCTRL, 0);
+		send_key(kbd, KEY_LEFTCTRL, 0);
 	} else {
 		send_key(kbd, code, 0);
 	}
@@ -214,7 +214,7 @@ static uint8_t what_mods(struct keyboard* kbd, uint16_t code)
 	return mods;
 }
 
-static void execute_macro(struct keyboard *kbd, int16_t dl, uint16_t idx, uint16_t orig_code)
+static uint64_t execute_macro(struct keyboard *kbd, int16_t dl, uint16_t idx, uint16_t orig_code)
 {
 	auto& macro = kbd->config.macros[idx & INT16_MAX];
 	/* Minimize redundant modifier strokes for simple key sequences. */
@@ -227,10 +227,11 @@ static void execute_macro(struct keyboard *kbd, int16_t dl, uint16_t idx, uint16
 		update_mods(kbd, dl, macro[0].mods.mods, macro[0].mods.wildc);
 		send_key(kbd, code, 1);
 		send_key(kbd, code, 0);
+		return 0;
 	} else {
 		// Completely disable mods if no wildcard is set
 		update_mods(kbd, dl, 0, (kbd->config.compat || idx & 0x8000) ? 0xff : 0);
-		macro_execute(kbd->output.send_key, macro, kbd->config.macro_sequence_timeout, &kbd->config);
+		return macro_execute(kbd->output.send_key, macro, kbd->config.macro_sequence_timeout, &kbd->config) / 1000;
 	}
 }
 
@@ -843,7 +844,7 @@ static int64_t process_descriptor(struct keyboard *kbd, uint16_t code, const str
 
 			clear_oneshot(kbd, "macro");
 
-			execute_macro(kbd, dl, macro_idx, code);
+			timeout += execute_macro(kbd, dl, macro_idx, code);
 			kbd->active_macro = macro_idx;
 			kbd->active_macro_layer = dl;
 
@@ -1290,8 +1291,8 @@ static int64_t process_event(struct keyboard *kbd, uint16_t code, int pressed, i
 			kbd->active_macro = -1;
 			update_mods(kbd, -1, 0);
 		} else if (time >= kbd->macro_timeout) {
-			execute_macro(kbd, kbd->active_macro_layer, kbd->active_macro, code);
-			kbd->macro_timeout = time+kbd->macro_repeat_interval;
+			auto add = execute_macro(kbd, kbd->active_macro_layer, kbd->active_macro, code);
+			kbd->macro_timeout = add + time + kbd->macro_repeat_interval;
 			schedule_timeout(kbd, kbd->macro_timeout);
 		}
 	}

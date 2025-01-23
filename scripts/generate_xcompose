@@ -112,14 +112,14 @@ open('src/unicode.cpp', 'w').write(f'''
 	void unicode_get_sequence(int idx, uint8_t codes[4])
 	{{
 		uint8_t chars[] = {{
-			KEYD_0, KEYD_1, KEYD_2, KEYD_3, KEYD_4, KEYD_5, KEYD_6, KEYD_7,
-			KEYD_8, KEYD_9, KEYD_A, KEYD_B, KEYD_C, KEYD_D, KEYD_E, KEYD_F,
-			KEYD_G, KEYD_H, KEYD_I, KEYD_J, KEYD_K, KEYD_L, KEYD_M, KEYD_N,
-			KEYD_O, KEYD_P, KEYD_Q, KEYD_R, KEYD_S, KEYD_T, KEYD_U, KEYD_V,
-			KEYD_W, KEYD_X, KEYD_Y, KEYD_Z
+			KEY_0, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7,
+			KEY_8, KEY_9, KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F,
+			KEY_G, KEY_H, KEY_I, KEY_J, KEY_K, KEY_L, KEY_M, KEY_N,
+			KEY_O, KEY_P, KEY_Q, KEY_R, KEY_S, KEY_T, KEY_U, KEY_V,
+			KEY_W, KEY_X, KEY_Y, KEY_Z
 		}};
 
-		codes[0] = KEYD_CANCEL;
+		codes[0] = KEY_CANCEL;
 		codes[1] = chars[idx / (36 * 36) % 36];
 		codes[2] = chars[idx / 36 % 36];
 		codes[3] = chars[idx % 36];

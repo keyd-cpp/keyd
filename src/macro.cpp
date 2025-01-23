@@ -222,9 +222,9 @@ int macro_parse(std::string_view s, macro& macro, struct config* config, const s
 	return 0;
 }
 
-void macro_execute(void (*output)(uint16_t, uint8_t),
-		   const macro& macro, size_t timeout, struct config* config)
+uint64_t macro_execute(void (*output)(uint16_t, uint8_t), const macro& macro, uint64_t timeout, struct config* config)
 {
+	uint64_t t = 0;
 	int hold_start = -1;
 
 	for (size_t i = 0; i < macro.size; i++) {
@@ -289,7 +289,7 @@ void macro_execute(void (*output)(uint16_t, uint8_t),
 			}
 
 			if (mods && timeout)
-				usleep(timeout);
+				t += timeout, usleep(timeout);
 
 			output(code, 1);
 			output(code, 0);
@@ -305,6 +305,7 @@ void macro_execute(void (*output)(uint16_t, uint8_t),
 
 			break;
 		case MACRO_TIMEOUT:
+			t += ent->code * 1000;
 			usleep(ent->code * 1000);
 			break;
 		case MACRO_COMMAND:
@@ -316,8 +317,9 @@ void macro_execute(void (*output)(uint16_t, uint8_t),
 		}
 
 		if (timeout)
-			usleep(timeout);
+			t += timeout, usleep(timeout);
 	}
 
 	cmd_buf.clear();
+	return t;
 }

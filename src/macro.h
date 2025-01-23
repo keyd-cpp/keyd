@@ -55,9 +55,7 @@ struct macro {
 	bool equals(const struct config*, const macro&) const;
 };
 
-void macro_execute(void (*output)(uint16_t, uint8_t),
-		   const macro& macro,
-		   size_t timeout, struct config* config);
+uint64_t macro_execute(void (*output)(uint16_t, uint8_t), const macro& macro, uint64_t timeout, struct config* config);
 
 int macro_parse(std::string_view, macro& macro, struct config* config, const smart_ptr<struct env_pack>&);
 #endif

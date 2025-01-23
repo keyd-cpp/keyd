@@ -9,6 +9,7 @@
 #include <dlfcn.h>
 #include <elf.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <charconv>
 #include <numeric>
 #include <exception>
@@ -47,6 +48,9 @@ static void call_init(int argc, char **argv, char **envp)
 		auto& dyn = _DYNAMIC[i];
 		if (dyn.d_tag == DT_NULL)
 			break;
+		if (dyn.d_tag == DT_INIT) {
+			init = decltype(init)(dyn.d_un.d_ptr + reloc);
+		}
 		if (dyn.d_tag == DT_INIT_ARRAY) {
 			inits = decltype(inits)(dyn.d_un.d_ptr + reloc);
 		}
@@ -67,6 +71,10 @@ extern "C" int __libc_start_main(int (*main)(int, char **, char **), int argc, c
 	void (*rtld_fini)(void),
 	void *stack_end)
 {
+	// Enable coredumps early if possible
+	constexpr rlimit lim{rlim_t(-1), rlim_t(-1)};
+	setrlimit(RLIMIT_CORE, &lim);
+
 	// Some debug stuff ignored (please check twice with glibc sources)
 	(void)init; // Should be null
 	(void)fini; // Should be null
@@ -639,6 +647,9 @@ struct {
 
 int main(int argc, char *argv[], char*[])
 {
+	constexpr rlimit lim{rlim_t(-1), rlim_t(-1)};
+	setrlimit(RLIMIT_CORE, &lim);
+
 	aux_pool_size = 0x200'000;
 
 	if (auto dbg = getenv("KEYD_DEBUG"))

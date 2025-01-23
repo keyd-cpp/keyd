@@ -16,7 +16,7 @@
 
 struct vkbd {};
 
-std::shared_ptr<vkbd> vkbd_init(const char *name)
+struct vkbd* vkbd_init(const char*)
 {
 	return nullptr;
 }

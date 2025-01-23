@@ -1048,7 +1048,7 @@ bool config_parse(struct config *config, const char *path)
 	aliases.modifiers[MOD_SUPER] = {KEY_LEFTMETA, KEY_RIGHTMETA};
 	aliases.modifiers[MOD_SHIFT] = {KEY_LEFTSHIFT, KEY_RIGHTSHIFT};
 	aliases.modifiers[MOD_CTRL] = {KEY_LEFTCTRL, KEY_RIGHTCTRL};
-	aliases.modifiers[MOD_ALT_GR] = {KEYD_RIGHTALT};
+	aliases.modifiers[MOD_ALT_GR] = {KEY_RIGHTALT};
 
 	// First pass
 	size_t chksum0 = 0;

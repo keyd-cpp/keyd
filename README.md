@@ -71,6 +71,7 @@ keyd++ is a fork of keyd and has some additional features at the moment:
 # Installation
 
 *Note:* master serves as the development branch, things may occasionally break.
+Checkout latest tag instead, as described below.
 
 ## From Source
 
@@ -80,12 +81,16 @@ sudo apt install build-essentials git
 # Clone with git clone or download sources manually to keyd directory
 git clone https://github.com/keyd-cpp/keyd.git
 cd keyd
-# Specify your favourite compiler and options (optional)
+# Checkout latest tag (optional but recommended)
+git stash && git fetch && git checkout $(git describe --tags $(git rev-list --tags --max-count=1))
+# Specify compatible C++ compiler and options (optional)
 export CXX=clang++-18 CXXFLAGS=-s
 # First time install
 make && sudo make install && sudo systemctl enable --now keyd
 # Second time install (update example)
 make && sudo make install && sudo systemctl daemon-reload && sudo systemctl restart keyd
+# To update local master branch with latest commits (git pull may not work):
+git stash && git fetch && git checkout master && git reset --hard origin/master
 ```
 
 # Quickstart
@@ -111,6 +116,9 @@ M-numlock = numlock
 capslock = overload(control, esc)
 # When capslock is pressed with other modifiers, disable esc.
 **capslock = layer(control)
+
+# Turns insert into Shift-Insert (paste from primary selection)
+insert = S-insert
 
 # Remaps the escape key (without modifiers) to capslock
 esc = capslock
@@ -180,41 +188,3 @@ You will probably want to put `keyd-application-mapper -d` somewhere in your
 display server initialization logic (e.g ~/.xinitrc) unless you are running Gnome.
 
 See the man page for more details.
-
-## SBC support
-
-Experimental support for single board computers (SBCs) via usb-gadget
-has been added courtesy of Giorgi Chavchanidze.
-
-See [usb-gadget.md](src/vkbd/usb-gadget.md) for details.
-
-## Packages
-
-Third party packages for the some distributions.
-
-# Example config
-
-Many users will probably not be interested in taking full advantage of keyd.
-For those who seek simple quality of life improvements I can recommend the
-following config:
-
-	[ids]
-
-	k:*
-
-	[main]
-
-	**shift = oneshot(shift)
-	**meta = oneshot(meta)
-	**control = oneshot(control)
-	**alt = oneshot(alt)
-	**altgr = oneshot(altgr)
-
-	capslock = overload(control, esc)
-	**capslock = layer(control)
-	insert = S-insert
-
-This overloads the capslock key to function as both escape (when tapped) and
-control (when held) and remaps all modifiers to 'oneshot' keys. Thus to produce
-the letter A you can now simply tap shift and then a instead of having to hold
-it. Finally it remaps insert to S-insert (paste on X11).

@@ -22,6 +22,8 @@
 #include "../keyd.h"
 
 struct vkbd {
+	const char* name_base = "";
+
 	int fd = -1;
 	int pfd = -1;
 
@@ -29,7 +31,10 @@ struct vkbd {
 	int vwheel_buf = 0;
 	int hwheel_buf = 0;
 
-	vkbd() = default;
+	vkbd(const char* name)
+		: name_base(name)
+	{
+	}
 	vkbd(const vkbd&) = delete;
 	vkbd& operator=(const vkbd&) = delete;
 	~vkbd()
@@ -111,7 +116,7 @@ static int create_virtual_keyboard(const char *name)
 	udev.id.vendor = 0x0FAC;
 	udev.id.product = 0x0ADE;
 
-	snprintf(udev.name, sizeof(udev.name), "%s", name);
+	snprintf(udev.name, sizeof(udev.name), "%skeyboard", name);
 
 	/*
 	 * We use this in favour of the newer UINPUT_DEV_SETUP
@@ -168,7 +173,7 @@ static int create_virtual_pointer(const char *name)
 	udev.absmax[ABS_X] = 1024;
 	udev.absmax[ABS_Y] = 1024;
 
-	snprintf(udev.name, sizeof(udev.name), "%s", name);
+	snprintf(udev.name, sizeof(udev.name), "%spointer", name);
 
 	if (write(fd, &udev, sizeof udev) < 0) {
 		fprintf(stderr, "failed to create uinput device\n");
@@ -182,20 +187,9 @@ static int create_virtual_pointer(const char *name)
 
 static void write_key_event(struct vkbd *vkbd, uint16_t code, int state)
 {
-	int is_btn = 1;
-	switch (code) {
-		case KEYD_LEFT_MOUSE:
-		case KEYD_MIDDLE_MOUSE:
-		case KEYD_RIGHT_MOUSE:
-		case KEYD_MOUSE_1:
-		case KEYD_MOUSE_2:
-		case KEYD_MOUSE_BACK:
-		case KEYD_MOUSE_FORWARD:
-			break;
-		default:
-			is_btn = 0;
-			break;
-	}
+	int is_btn = 0;
+	if (code >= BTN_MOUSE && code < std::min(BTN_JOYSTICK, BTN_MOUSE + 16))
+		is_btn = 1;
 
 	if (is_btn) {
 		/*
@@ -214,13 +208,15 @@ static void write_key_event(struct vkbd *vkbd, uint16_t code, int state)
 	vkbd->send_kbd_event(is_btn, EV_KEY, code, state);
 }
 
-std::shared_ptr<vkbd> vkbd_init(const char *)
+struct vkbd* vkbd_init(const char* base_name)
 {
-	auto vkbd = std::make_shared<struct vkbd>();
-	vkbd->fd = create_virtual_keyboard(VKBD_NAME "keyboard");
-	vkbd->pfd = create_virtual_pointer(VKBD_NAME "pointer");
+	static struct vkbd vkbd(base_name);
+	if (vkbd.fd == -1)
+		vkbd.fd = create_virtual_keyboard(vkbd.name_base);
+	if (vkbd.pfd == -1)
+		vkbd.pfd = create_virtual_pointer(vkbd.name_base);
 
-	return vkbd;
+	return &vkbd;
 }
 
 void vkbd_mouse_move(struct vkbd *vkbd, int x, int y)

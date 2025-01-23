@@ -6,18 +6,20 @@ static int aux_fd = -1;
 // Expected to terminate if fd 0 or -1
 std::array<device, 128> device_table{};
 
-static void panic_check(uint16_t code, uint8_t pressed)
+static void panic_check(const device_event* ev)
 {
+	if (ev->type != DEV_KEY)
+		return;
 	static uint8_t enter, backspace, escape;
-	switch (code) {
-	case KEYD_ENTER:
-		enter = pressed;
+	switch (ev->code) {
+	case KEY_ENTER:
+		enter = ev->pressed;
 		break;
-	case KEYD_BACKSPACE:
-		backspace = pressed;
+	case KEY_BACKSPACE:
+		backspace = ev->pressed;
 		break;
-	case KEYD_ESC:
-		escape = pressed;
+	case KEY_ESC:
+		escape = ev->pressed;
 		break;
 	}
 
@@ -110,8 +112,7 @@ int evloop(int (*event_handler)(struct event* ev), bool monitor)
 						removed = 1;
 						break;
 					} else {
-						//Handle device event
-						panic_check(devev->code, devev->pressed);
+						panic_check(devev);
 
 						ev.type = EV_DEV_EVENT;
 						ev.devev = devev;

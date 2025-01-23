@@ -9,7 +9,7 @@
 #endif
 
 static int ipcfd = -1;
-static std::shared_ptr<struct vkbd> vkbd;
+static struct vkbd* vkbd;
 static std::vector<std::unique_ptr<keyboard>> configs;
 extern std::array<device, 128> device_table;
 
@@ -88,19 +88,19 @@ static void clear_vkbd()
 {
 	for (size_t i = 0; i < keystate.size(); i++) {
 		if (keystate[i]) {
-			vkbd_send_key(vkbd.get(), i, 0);
+			vkbd_send_key(vkbd, i, 0);
 			keystate[i] = 0;
 		}
 	}
 
-	vkbd_flush(vkbd.get());
+	vkbd_flush(vkbd);
 }
 
 static void send_key(uint16_t code, uint8_t state)
 {
 	if (code < keystate.size())
 		keystate[code] = state;
-	vkbd_send_key(vkbd.get(), code, state);
+	vkbd_send_key(vkbd, code, state);
 }
 
 static void add_listener(::listener con)
@@ -375,7 +375,6 @@ static int input(char *buf, [[maybe_unused]] size_t sz, uint32_t timeout)
 	size_t i;
 	uint32_t codepoint;
 	uint8_t codes[4];
-	auto vkbd = ::vkbd.get();
 
 	int csz;
 
@@ -392,23 +391,23 @@ static int input(char *buf, [[maybe_unused]] size_t sz, uint32_t timeout)
 			found = 1;
 			if (!parse_key_sequence(s, &code, &mods) && code) {
 				if (mods & (1 << MOD_SHIFT)) {
-					vkbd_send_key(vkbd, KEYD_LEFTSHIFT, 1);
+					vkbd_send_key(vkbd, KEY_LEFTSHIFT, 1);
 					vkbd_send_key(vkbd, code, 1);
 					vkbd_send_key(vkbd, code, 0);
-					vkbd_send_key(vkbd, KEYD_LEFTSHIFT, 0);
+					vkbd_send_key(vkbd, KEY_LEFTSHIFT, 0);
 				} else {
 					vkbd_send_key(vkbd, code, 1);
 					vkbd_send_key(vkbd, code, 0);
 				}
 			} else if ((char)codepoint == ' ') {
-				vkbd_send_key(vkbd, KEYD_SPACE, 1);
-				vkbd_send_key(vkbd, KEYD_SPACE, 0);
+				vkbd_send_key(vkbd, KEY_SPACE, 1);
+				vkbd_send_key(vkbd, KEY_SPACE, 0);
 			} else if ((char)codepoint == '\n') {
-				vkbd_send_key(vkbd, KEYD_ENTER, 1);
-				vkbd_send_key(vkbd, KEYD_ENTER, 0);
+				vkbd_send_key(vkbd, KEY_ENTER, 1);
+				vkbd_send_key(vkbd, KEY_ENTER, 0);
 			} else if ((char)codepoint == '\t') {
-				vkbd_send_key(vkbd, KEYD_TAB, 1);
-				vkbd_send_key(vkbd, KEYD_TAB, 0);
+				vkbd_send_key(vkbd, KEY_TAB, 1);
+				vkbd_send_key(vkbd, KEY_TAB, 0);
 			} else {
 				found = 0;
 			}
@@ -619,7 +618,6 @@ static int event_handler(struct event *ev)
 	static int64_t last_time = 0;
 	static int timeout = 0;
 	struct key_event kev = {};
-	auto vkbd = ::vkbd.get();
 
 	timeout -= ev->timestamp - last_time;
 	last_time = ev->timestamp;
