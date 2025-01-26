@@ -28,7 +28,7 @@ CFLAGS:=-DVERSION=\"v$(VERSION)\ \($(COMMIT)\)\" \
 
 CXXFLAGS:=-DVERSION=\"v$(VERSION)\ \($(COMMIT)\)\" \
 	-I/usr/local/include \
-	-L. -L/usr/local/lib \
+	-L/usr/local/lib \
 	-Wall \
 	-Wextra \
 	-Wno-unused \

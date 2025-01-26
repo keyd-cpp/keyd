@@ -72,8 +72,10 @@ extern "C" int __libc_start_main(int (*main)(int, char **, char **), int argc, c
 	void *stack_end)
 {
 	// Enable coredumps early if possible
-	constexpr rlimit lim{rlim_t(-1), rlim_t(-1)};
-	setrlimit(RLIMIT_CORE, &lim);
+	if (std::getenv("KEYD_COREDUMP")) {
+		constexpr rlimit lim{rlim_t(-1), rlim_t(-1)};
+		setrlimit(RLIMIT_CORE, &lim);
+	}
 
 	// Some debug stuff ignored (please check twice with glibc sources)
 	(void)init; // Should be null
@@ -647,15 +649,17 @@ struct {
 
 int main(int argc, char *argv[], char*[])
 {
-	constexpr rlimit lim{rlim_t(-1), rlim_t(-1)};
-	setrlimit(RLIMIT_CORE, &lim);
-
 	aux_pool_size = 0x200'000;
 
 	if (auto dbg = getenv("KEYD_DEBUG"))
 		log_level = atoi(dbg);
 	if (auto aux = getenv("KEYD_AUX_POOL"))
 		aux_pool_size = atoi(aux);
+
+	if (std::getenv("KEYD_COREDUMP")) {
+		constexpr rlimit lim{rlim_t(-1), rlim_t(-1)};
+		setrlimit(RLIMIT_CORE, &lim);
+	}
 
 	if (isatty(1))
 		suppress_colours = getenv("NO_COLOR") ? 1 : 0;
