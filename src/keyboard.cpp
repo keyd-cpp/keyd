@@ -1385,8 +1385,8 @@ bool kbd_eval(struct keyboard* kbd, std::string_view exp)
 		}
 		return true;
 	} else {
-		auto section = exp.substr(0, exp.find_first_of('.'));
-		if (section.size() == exp.size())
+		auto section = exp.substr(0, exp.find_first_of(".="));
+		if (section.size() == exp.size() || exp[section.size()] != '.')
 			section = {};
 		else
 			exp.remove_prefix(section.size() + 1);
